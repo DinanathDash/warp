@@ -13,13 +13,11 @@ public struct WarpShelfWidgetView: View {
     let onOpenExpanded: () -> Void
     let onOpenSettings: () -> Void
 
-    public static let contentHeight: CGFloat = 288
-    public static let preferredSoloWidth: CGFloat = 152
-    public static let preferredPairedWidth: CGFloat = 144
+    public static let contentHeight: CGFloat = 160
+    public static let preferredSoloWidth: CGFloat = 380
+    public static let preferredPairedWidth: CGFloat = 190
     public static let minimumWidth: CGFloat = 140
     public static let pairWeight: Double = 0.62
-
-    private static let bottomControlHeight: CGFloat = DroppyWashSize.solo
 
     @State private var didCopy = false
     @State private var copyFeedbackTask: Task<Void, Never>?
@@ -78,60 +76,23 @@ public struct WarpShelfWidgetView: View {
         return .idle
     }
 
+    private var dialSize: CGFloat {
+        if context.isCompact {
+            return 90
+        }
+        return 114
+    }
+
     public var body: some View {
-        GeometryReader { geometry in
-            let isSpacious = !context.isCompact
-            let sideMargin: CGFloat = isSpacious ? DroppySpacing.lg : 0
-            let columnWidth = isSpacious
-                ? min(geometry.size.width - sideMargin * 2, 224)
-                : geometry.size.width
-            let topDialClearance: CGFloat = isSpacious ? DroppySpacing.xs : 10
-            let statsReserve: CGFloat = isSpacious ? 46 : 38
-            let reservedVertical: CGFloat = topDialClearance + DroppySpacing.sm + statsReserve + DroppySpacing.smd + Self.bottomControlHeight
-            let dialSize = max(96, min(columnWidth, geometry.size.height - reservedVertical))
-            let expandDiameter: CGFloat = isSpacious ? DroppyWashSize.paired : DroppyWashSize.row
+        VStack(spacing: 0) {
+            if !context.isCompact {
+                headerRow
+            }
 
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 0) {
-                    Button(action: onOpenExpanded) {
-                        WarpGaugeView(
-                            speedMbps: currentDisplaySpeed,
-                            phase: gaugePhase,
-                            unit: engine.speedUnit,
-                            size: dialSize,
-                            showTicks: true,
-                            progress: engine.testProgress,
-                            usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, topDialClearance)
-                    .help("Open expanded speedtest")
-                    .accessibilityLabel("Open expanded speedtest")
-
-                    Spacer(minLength: DroppySpacing.sm)
-
-                    previousStatsView(isSpacious: isSpacious)
-
-                    Spacer(minLength: DroppySpacing.smd)
-
-                    bottomActionRow(isSpacious: isSpacious)
-                }
-                .frame(width: columnWidth, height: geometry.size.height)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-
-                Button(action: onOpenExpanded) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-                .buttonStyle(
-                    DroppyWashCircleButtonStyle(
-                        diameter: expandDiameter,
-                        tone: .neutral,
-                        usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-                    )
-                )
-                .help("Open expanded bento view")
-                .accessibilityLabel("Open expanded bento view")
+            if context.isCompact {
+                compactLayout
+            } else {
+                spaciousLayout
             }
         }
         .padding(context.contentInsets)
@@ -146,105 +107,232 @@ public struct WarpShelfWidgetView: View {
         }
     }
 
-    private func previousStatsView(isSpacious: Bool) -> some View {
-        VStack(spacing: isSpacious ? 4 : 3) {
-            HStack(spacing: isSpacious ? DroppySpacing.xl : DroppySpacing.smd) {
-                HStack(alignment: .firstTextBaseline, spacing: isSpacious ? 4 : 3) {
+    // MARK: - Header (Settings & Expand above notch line)
+
+    @ViewBuilder
+    private var headerRow: some View {
+        if let wrap = context.notchWrap {
+            ShelfWidgetNotchWrapRow(wrap) {
+                settingsButton
+            } trailing: {
+                expandButton
+            }
+        } else {
+            HStack {
+                settingsButton
+                Spacer(minLength: 0)
+                expandButton
+            }
+            .frame(height: 28)
+        }
+    }
+
+    private var settingsButton: some View {
+        Button {
+            onOpenSettings()
+        } label: {
+            Image(systemName: "gearshape")
+        }
+        .buttonStyle(
+            DroppyWashCircleButtonStyle(
+                diameter: context.washControlSize,
+                tone: .neutral,
+                usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+            )
+        )
+        .padding(.top, 4)
+        .help("Warp settings")
+        .accessibilityLabel("Warp settings")
+    }
+
+    private var expandButton: some View {
+        Button {
+            onOpenExpanded()
+        } label: {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        }
+        .buttonStyle(
+            DroppyWashCircleButtonStyle(
+                diameter: context.washControlSize,
+                tone: .neutral,
+                usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+            )
+        )
+        .padding(.top, 4)
+        .help("Open expanded view")
+        .accessibilityLabel("Open expanded view")
+    }
+
+    // MARK: - Spacious Layout
+
+    private var spaciousLayout: some View {
+        HStack(alignment: .center, spacing: DroppySpacing.xl) {
+            gaugeButton(size: dialSize)
+
+            VStack(alignment: .center, spacing: 10) {
+                // Row 1: Designated Download & Upload telemetry areas (50/50)
+                telemetryColumns(isSpacious: true)
+
+                // Row 2: Ping / Live testing state in the center in a single line
+                pingStatusRow(isSpacious: true)
+
+                // Row 3: Action buttons (Copy + compact Start/Cancel)
+                actionButtonsRow(isSpacious: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    // MARK: - Compact Layout
+
+    private var compactLayout: some View {
+        HStack(alignment: .center, spacing: DroppySpacing.sm) {
+            gaugeButton(size: dialSize)
+
+            VStack(alignment: .center, spacing: 6) {
+                HStack {
+                    Spacer(minLength: 0)
+                    expandButton
+                }
+                .padding(.top, -2)
+
+                telemetryColumns(isSpacious: false)
+                pingStatusRow(isSpacious: false)
+                actionButtonsRow(isSpacious: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func gaugeButton(size: CGFloat) -> some View {
+        Button(action: onOpenExpanded) {
+            WarpGaugeView(
+                speedMbps: currentDisplaySpeed,
+                phase: gaugePhase,
+                unit: engine.speedUnit,
+                size: size,
+                showTicks: false,
+                progress: engine.testProgress,
+                interfaceIcon: engine.activeInterfaceIcon,
+                usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Open expanded speedtest")
+        .accessibilityLabel("Open expanded speedtest")
+    }
+
+    // MARK: - Telemetry Columns (Download & Upload in half width)
+
+    private func telemetryColumns(isSpacious: Bool) -> some View {
+        HStack(spacing: 0) {
+            // Download column
+            VStack(alignment: .center, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Image(systemName: "arrow.down")
-                        .font(.system(size: isSpacious ? 12 : 9, weight: .bold))
+                        .font(.system(size: isSpacious ? 11 : 9, weight: .bold))
                         .foregroundStyle(.green)
 
                     Text(downloadValueText)
-                        .font(.system(size: isSpacious ? 21 : 14, weight: .bold))
+                        .font(.system(size: isSpacious ? 20 : 15, weight: .bold))
                         .foregroundStyle(hasDownloadValue ? .green : primaryInk)
                         .monospacedDigit()
                         .contentTransition(.numericText(value: downloadNumericValue))
                         .animation(.smooth(duration: 0.3), value: downloadValueText)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    if hasDownloadValue {
-                        Text(engine.speedUnit.rawValue)
-                            .font(.system(size: isSpacious ? 11 : 9, weight: .semibold))
-                            .foregroundStyle(Color.green.opacity(0.82))
-                            .lineLimit(1)
-                    }
                 }
 
-                HStack(alignment: .firstTextBaseline, spacing: isSpacious ? 4 : 3) {
+                Text(hasDownloadValue ? engine.speedUnit.rawValue : "Download")
+                    .font(.system(size: isSpacious ? 11 : 9, weight: .medium))
+                    .foregroundStyle(hasDownloadValue ? Color.green.opacity(0.85) : secondaryInk)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            // Upload column
+            VStack(alignment: .center, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: isSpacious ? 12 : 9, weight: .bold))
+                        .font(.system(size: isSpacious ? 11 : 9, weight: .bold))
                         .foregroundStyle(.purple)
 
                     Text(uploadValueText)
-                        .font(.system(size: isSpacious ? 21 : 14, weight: .bold))
+                        .font(.system(size: isSpacious ? 20 : 15, weight: .bold))
                         .foregroundStyle(hasUploadValue ? .purple : primaryInk)
                         .monospacedDigit()
                         .contentTransition(.numericText(value: uploadNumericValue))
                         .animation(.smooth(duration: 0.3), value: uploadValueText)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    if hasUploadValue {
-                        Text(engine.speedUnit.rawValue)
-                            .font(.system(size: isSpacious ? 11 : 9, weight: .semibold))
-                            .foregroundStyle(Color.purple.opacity(0.82))
-                            .lineLimit(1)
-                    }
                 }
+
+                Text(hasUploadValue ? engine.speedUnit.rawValue : "Upload")
+                    .font(.system(size: isSpacious ? 11 : 9, weight: .medium))
+                    .foregroundStyle(hasUploadValue ? Color.purple.opacity(0.85) : secondaryInk)
+                    .lineLimit(1)
             }
-
-            HStack(spacing: 4) {
-                if isTesting {
-                    Text(liveTestingStatusText)
-                        .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
-                        .foregroundStyle(secondaryInk)
-                        .lineLimit(1)
-
-                    if engine.estimatedRemainingSeconds > 0 {
-                        Text("·")
-                            .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
-                            .foregroundStyle(secondaryInk)
-
-                        Text(remainingTimeText)
-                            .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
-                            .foregroundStyle(secondaryInk)
-                            .monospacedDigit()
-                            .contentTransition(.numericText(countsDown: true))
-                            .animation(.smooth(duration: 0.3), value: engine.estimatedRemainingSeconds)
-                            .lineLimit(1)
-                    }
-                } else {
-                    Image(systemName: "gauge.medium")
-                        .font(.system(size: isSpacious ? 10 : 9, weight: .medium))
-                        .foregroundStyle(secondaryInk)
-                    Text(pingText)
-                        .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
-                        .foregroundStyle(secondaryInk)
-                        .monospacedDigit()
-                        .contentTransition(.numericText(value: pingNumericValue))
-                        .animation(.smooth(duration: 0.3), value: pingText)
-                        .lineLimit(1)
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func bottomActionRow(isSpacious: Bool) -> some View {
-        HStack(spacing: isSpacious ? DroppySpacing.sm : DroppySpacing.xsm) {
+    // MARK: - Ping / Live Status Row (Single line, centered)
+
+    private func pingStatusRow(isSpacious: Bool) -> some View {
+        HStack(spacing: 5) {
+            if isTesting {
+                Text(liveTestingStatusText)
+                    .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                    .lineLimit(1)
+
+                if engine.estimatedRemainingSeconds > 0 {
+                    Text("·")
+                        .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
+                        .foregroundStyle(secondaryInk)
+
+                    Text(remainingTimeText)
+                        .font(.system(size: isSpacious ? 11 : 10, weight: .medium))
+                        .foregroundStyle(secondaryInk)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(.smooth(duration: 0.3), value: engine.estimatedRemainingSeconds)
+                        .lineLimit(1)
+                }
+            } else {
+                Image(systemName: "gauge.medium")
+                    .font(.system(size: isSpacious ? 11 : 9, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                Text(pingText)
+                    .font(.system(size: isSpacious ? 12 : 10, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: pingNumericValue))
+                    .animation(.smooth(duration: 0.3), value: pingText)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    // MARK: - Action Buttons Row (Copy + reduced-width Cyan/Blue button)
+
+    private func actionButtonsRow(isSpacious: Bool) -> some View {
+        HStack(spacing: 8) {
             Button {
                 copyLatestStats()
             } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.system(size: isSpacious ? 13 : 11, weight: .semibold))
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(
                 DroppyWashCircleButtonStyle(
-                    diameter: Self.bottomControlHeight,
-                    tone: didCopy ? .accent(.green) : .neutral,
-                    glyphSize: 14.5,
+                    diameter: isSpacious ? 28 : 24,
+                    tone: didCopy ? .accent(.cyan) : .neutral,
+                    glyphSize: isSpacious ? 13 : 11,
                     usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
                 )
             )
@@ -264,21 +352,23 @@ public struct WarpShelfWidgetView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: isTesting ? "stop.fill" : "play.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .contentTransition(.symbolEffect(.replace))
-                    Text(isTesting ? "Cancel" : "Test Again")
-                        .font(.system(size: isSpacious ? 14 : 13, weight: .semibold))
+                    Text(isTesting ? "Cancel" : (engine.latestRecordedStats == nil ? "Start" : "Test Again"))
+                        .font(.system(size: isSpacious ? 12.5 : 11, weight: .semibold))
                 }
+                .padding(.horizontal, isSpacious ? 14 : 10)
             }
             .buttonStyle(
                 DroppyWashPillButtonStyle(
-                    height: Self.bottomControlHeight,
-                    tone: .neutral,
-                    fillsWidth: true,
+                    height: isSpacious ? 28 : 24,
+                    tone: isTesting ? .neutral : .accent(.cyan),
+                    fillsWidth: false,
                     usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
                 )
             )
         }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private func copyLatestStats() {

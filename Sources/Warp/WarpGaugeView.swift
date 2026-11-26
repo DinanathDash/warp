@@ -14,6 +14,7 @@ public struct WarpGaugeView: View {
     let size: CGFloat
     let showTicks: Bool
     let progress: Double
+    let interfaceIcon: String
     let usesAdaptiveForegrounds: Bool
     let onRaisedCard: Bool
 
@@ -59,8 +60,9 @@ public struct WarpGaugeView: View {
         phase: SpeedtestPhase,
         unit: SpeedUnit = .mbps,
         size: CGFloat = 160,
-        showTicks: Bool = true,
+        showTicks: Bool = false,
         progress: Double = 0.0,
+        interfaceIcon: String = "wifi",
         usesAdaptiveForegrounds: Bool = false,
         onRaisedCard: Bool = false
     ) {
@@ -70,6 +72,7 @@ public struct WarpGaugeView: View {
         self.size = size
         self.showTicks = showTicks
         self.progress = progress
+        self.interfaceIcon = interfaceIcon
         self.usesAdaptiveForegrounds = usesAdaptiveForegrounds
         self.onRaisedCard = onRaisedCard
     }
@@ -123,7 +126,7 @@ public struct WarpGaugeView: View {
 
     public var body: some View {
         ZStack {
-            // Layer 1 (Back): Tick marks rendered behind track and progress arc
+            // Layer 1 (Optional ticks behind track; default false for clean modern arc)
             if showTicks {
                 ticksView
             }
@@ -153,12 +156,20 @@ public struct WarpGaugeView: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.78), value: fraction)
             }
 
-            // Layer 4: Centered iOS-style Wi-Fi indicator scaled dynamically via variableValue
-            Image(systemName: "wifi", variableValue: wifiVariableValue)
-                .font(.system(size: size * 0.30, weight: .semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(primaryInk)
-                .animation(.easeInOut(duration: 0.2), value: wifiVariableValue)
+            // Layer 4: Centered network interface icon (Wi-Fi with dynamic variableValue, or Ethernet cable/connector)
+            Group {
+                if interfaceIcon == "wifi" {
+                    Image(systemName: "wifi", variableValue: wifiVariableValue)
+                        .font(.system(size: size * 0.30, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(primaryInk)
+                        .animation(.easeInOut(duration: 0.2), value: wifiVariableValue)
+                } else {
+                    Image(systemName: interfaceIcon)
+                        .font(.system(size: size * 0.30, weight: .semibold))
+                        .foregroundStyle(primaryInk)
+                }
+            }
 
             // Layer 5: Bottom duration progress dots (elapsed vs. remaining time)
             bottomProgressDotsView

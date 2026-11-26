@@ -7,24 +7,11 @@ import AppKit
 @_weakLinked import DroppyKit
 import SwiftUI
 
-private struct ExpandedContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if next > 0 {
-            value = next
-        }
-    }
-}
-
 public struct WarpExpandedSurfaceView: View {
     @ObservedObject var engine: WarpEngine
     let onDismiss: () -> Void
     let onCollapse: () -> Void
     let onOpenSettings: () -> Void
-    let onMeasuredHeight: ((CGFloat) -> Void)?
-
-    public static let preferredWidth: CGFloat = 584
 
     @State private var isMorphedIn = false
     @State private var isCollapsing = false
@@ -35,60 +22,53 @@ public struct WarpExpandedSurfaceView: View {
         engine: WarpEngine,
         onDismiss: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void,
-        onMeasuredHeight: ((CGFloat) -> Void)? = nil
+        onOpenSettings: @escaping () -> Void
     ) {
         self.engine = engine
         self.onDismiss = onDismiss
         self.onCollapse = onCollapse
         self.onOpenSettings = onOpenSettings
-        self.onMeasuredHeight = onMeasuredHeight
     }
 
-    private var hasActiveTelemetry: Bool {
-        if let telemetry = engine.currentTelemetry, telemetry.downloadMbps > 0 {
-            return true
-        }
-        return false
+    private let bentoCardHeight: CGFloat = 276
+
+    private var isTesting: Bool {
+        engine.phase.isTesting
     }
 
-    private var hasDiagnosticsTile: Bool {
-        guard let telemetry = engine.currentTelemetry, telemetry.downloadMbps > 0 else { return false }
-        return telemetry.workingLatencyMs > 0 || telemetry.tcpHandshakeMs > 0
+    private var hasResultsOrTesting: Bool {
+        isTesting || (engine.currentTelemetry != nil && engine.currentTelemetry!.downloadMbps > 0)
     }
 
     public var body: some View {
-        VStack(spacing: DroppySpacing.md) {
+        VStack(spacing: 12) {
             headerBar
 
-            HStack(alignment: .top, spacing: DroppySpacing.mdl) {
-                leftGaugeBentoCard
-                    .frame(width: 215)
-                    .frame(maxHeight: .infinity)
-                    .scaleEffect(isCollapsing ? 0.78 : (isMorphedIn ? 1.0 : 0.88), anchor: .top)
-                    .offset(y: isCollapsing ? -18 : (isMorphedIn ? 0 : -10))
-                    .opacity(isCollapsing ? 0.0 : (isMorphedIn ? 1.0 : 0.0))
-
-                rightBentoColumn
-                    .scaleEffect(isCollapsing ? 0.82 : (isMorphedIn ? 1.0 : 0.90), anchor: .top)
-                    .offset(y: isCollapsing ? -14 : (isMorphedIn ? 0 : -8))
-                    .opacity(isCollapsing ? 0.0 : (isMorphedIn ? 1.0 : 0.0))
+            Group {
+                if hasResultsOrTesting {
+                    HStack(alignment: .top, spacing: 14) {
+                        leftGaugeBentoCard
+                        rightBentoColumn
+                    }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+                } else {
+                    freshCenterView
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.95).combined(with: .opacity),
+                            removal: .scale(scale: 0.95).combined(with: .opacity)
+                        ))
+                }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasActiveTelemetry)
-            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasDiagnosticsTile)
+            .scaleEffect(isCollapsing ? 0.80 : (isMorphedIn ? 1.0 : 0.88), anchor: .top)
+            .offset(y: isCollapsing ? -18 : (isMorphedIn ? 0 : -10))
+            .opacity(isCollapsing ? 0.0 : (isMorphedIn ? 1.0 : 0.0))
         }
-        .frame(width: Self.preferredWidth, alignment: .top)
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: ExpandedContentHeightKey.self, value: geo.size.height)
-            }
-        )
-        .onPreferenceChange(ExpandedContentHeightKey.self) { height in
-            guard height > 0 else { return }
-            onMeasuredHeight?(height)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(14)
+        .frame(width: 560, height: 340)
+        .animation(.spring(response: 0.52, dampingFraction: 0.82), value: hasResultsOrTesting)
         .onAppear {
             engine.expandedVisibilityDidChange(isVisible: true)
             withAnimation(.spring(response: 0.44, dampingFraction: 0.78)) {
@@ -101,29 +81,33 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private var headerBar: some View {
-        HStack(spacing: DroppySpacing.sm) {
+        HStack {
             Spacer()
 
-            Button {
-                onOpenSettings()
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 11))
-            .help("Settings")
+            HStack(spacing: 8) {
+                Button {
+                    onOpenSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 11))
+                .help("Settings")
 
-            Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                    isCollapsing = true
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        isCollapsing = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                        onCollapse()
+                    }
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                    onCollapse()
-                }
-            } label: {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 10))
+                .help("Collapse to HUD")
             }
-            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 10))
-            .help("Collapse to HUD")
         }
     }
 
@@ -137,47 +121,64 @@ public struct WarpExpandedSurfaceView: View {
         }
     }
 
-    private var currentReadoutSpeed: Double {
-        if engine.phase.isTesting {
-            return engine.displayedGaugeSpeed
-        } else if let telemetry = engine.currentTelemetry, telemetry.downloadMbps > 0 {
-            return telemetry.downloadMbps
-        } else {
-            return 0.0
+    private var freshCenterView: some View {
+        VStack(spacing: 16) {
+            Spacer(minLength: 0)
+
+            WarpGaugeView(
+                speedMbps: 0.0,
+                phase: .idle,
+                unit: engine.speedUnit,
+                size: 190,
+                showTicks: false,
+                interfaceIcon: engine.activeInterfaceIcon,
+                onRaisedCard: true
+            )
+
+            Spacer(minLength: 0)
+
+            Button {
+                withAnimation(.spring(response: 0.52, dampingFraction: 0.82)) {
+                    engine.startTest()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Start Speedtest")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
+            .frame(width: 210)
+
+            Spacer(minLength: 0)
         }
+        .padding(16)
+        .frame(width: 290, height: bentoCardHeight)
+        .background(
+            RoundedRectangle(cornerRadius: DroppyRadius.large, style: .continuous)
+                .fill(Self.bentoCardFill)
+        )
     }
 
     private var leftGaugeBentoCard: some View {
-        VStack(spacing: DroppySpacing.smd) {
-            statusBadge
+        VStack(spacing: 12) {
+            Spacer(minLength: 0)
 
-            GeometryReader { geo in
-                let dialSize = max(84, min(geo.size.width, geo.size.height))
-                WarpGaugeView(
-                    speedMbps: currentDisplaySpeed,
-                    phase: engine.phase.isTesting ? engine.phase : (engine.currentTelemetry != nil ? .completed : .idle),
-                    unit: engine.speedUnit,
-                    size: dialSize,
-                    showTicks: true,
-                    progress: engine.testProgress,
-                    onRaisedCard: true
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            }
-            .frame(minHeight: 104, maxHeight: .infinity)
+            WarpGaugeView(
+                speedMbps: currentDisplaySpeed,
+                phase: engine.phase.isTesting ? engine.phase : (engine.currentTelemetry != nil ? .completed : .idle),
+                unit: engine.speedUnit,
+                size: 160,
+                showTicks: false,
+                progress: engine.testProgress,
+                interfaceIcon: engine.activeInterfaceIcon,
+                onRaisedCard: true
+            )
 
-            HStack(alignment: .firstTextBaseline, spacing: DroppySpacing.xs) {
-                Text(engine.speedUnit.formatValueOnly(mbps: currentReadoutSpeed))
-                    .font(.system(size: 19, weight: .bold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: currentReadoutSpeed))
-                    .animation(.smooth(duration: 0.3), value: currentReadoutSpeed)
-                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-
-                Text(engine.speedUnit.rawValue)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-            }
+            Spacer(minLength: 0)
 
             if engine.phase.isTesting {
                 Button {
@@ -189,6 +190,7 @@ public struct WarpExpandedSurfaceView: View {
                         Text("Cancel Test")
                             .font(.system(size: 13, weight: .semibold))
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
             } else {
@@ -201,8 +203,9 @@ public struct WarpExpandedSurfaceView: View {
                         Text(engine.currentTelemetry == nil ? "Start Speedtest" : "Run Again")
                             .font(.system(size: 13, weight: .semibold))
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.green), fillsWidth: true, usesAdaptiveForegrounds: false))
+                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
 
                 if let shareURL = engine.currentTelemetry?.shareURL {
                     Button {
@@ -218,71 +221,29 @@ public struct WarpExpandedSurfaceView: View {
                     .buttonStyle(DroppyWashPillButtonStyle(height: 28, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
                 }
             }
+
+            Spacer(minLength: 0)
         }
-        .padding(DroppySpacing.mdl)
+        .padding(14)
+        .frame(width: 220, height: bentoCardHeight)
         .background(
             RoundedRectangle(cornerRadius: DroppyRadius.large, style: .continuous)
                 .fill(Self.bentoCardFill)
         )
     }
 
-    private var statusBadge: some View {
-        Text(statusTitle)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(statusTintColor)
-            .lineLimit(1)
-            .padding(.horizontal, DroppySpacing.smd)
-            .padding(.vertical, DroppySpacing.xs)
-            .background(Capsule(style: .continuous).fill(statusTintColor.opacity(0.16)))
-    }
-
-    private var statusTintColor: Color {
-        switch engine.phase {
-        case .locating, .pinging:
-            return .yellow
-        case .downloading, .completed:
-            return .green
-        case .uploading:
-            return .purple
-        case .failed:
-            return .red
-        case .idle:
-            return AdaptiveColors.notchSurfaceSecondaryText
-        }
-    }
-
-    private var statusTitle: String {
-        switch engine.phase {
-        case .locating: return "Locating server"
-        case .pinging: return "Testing ping"
-        case .downloading: return "Testing download"
-        case .uploading: return "Testing upload"
-        case .completed: return "Completed"
-        case .failed: return "Failed"
-        case .idle: return "Ready"
-        }
-    }
-
     private var rightBentoColumn: some View {
-        VStack(spacing: DroppySpacing.smd) {
-            if let telemetry = engine.currentTelemetry, telemetry.downloadMbps > 0 {
-                activeBentoGrid(telemetry: telemetry)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
-            } else {
-                idleBentoGrid
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
+        activeBentoGrid(telemetry: engine.currentTelemetry)
+            .frame(maxWidth: .infinity, maxHeight: bentoCardHeight)
     }
 
-    private func activeBentoGrid(telemetry: SpeedtestTelemetry) -> some View {
-        VStack(spacing: DroppySpacing.smd) {
-            HStack(spacing: DroppySpacing.smd) {
+    private func activeBentoGrid(telemetry: SpeedtestTelemetry?) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
                 bentoTile(
                     title: "Download",
                     value: displayDownloadSpeed,
-                    subtitle: isDownloadPhase ? "Testing…" : formatBytes(telemetry.bytesReceived),
+                    subtitle: isDownloadPhase ? "Testing…" : (telemetry.map { formatBytes($0.bytesReceived) } ?? "--"),
                     icon: "arrow.down.circle.fill",
                     color: .green,
                     valueColor: displayDownloadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .green
@@ -291,168 +252,54 @@ public struct WarpExpandedSurfaceView: View {
                 bentoTile(
                     title: "Upload",
                     value: displayUploadSpeed,
-                    subtitle: (isDownloadPhase || isUploadPhase) ? (isUploadPhase ? "Testing…" : "--") : formatBytes(telemetry.bytesSent),
+                    subtitle: (isDownloadPhase || isUploadPhase) ? (isUploadPhase ? "Testing…" : "--") : (telemetry.map { formatBytes($0.bytesSent) } ?? "--"),
                     icon: "arrow.up.circle.fill",
                     color: .purple,
                     valueColor: displayUploadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .purple
                 )
             }
 
-            HStack(spacing: DroppySpacing.smd) {
+            HStack(spacing: 8) {
                 bentoTile(
                     title: "Latency",
-                    value: String(format: "%.1f ms", telemetry.pingMs),
-                    subtitle: telemetry.responsivenessRPM > 0
-                        ? String(format: "%.0f RPM (%@)", telemetry.responsivenessRPM, rpmRating(telemetry.responsivenessRPM))
-                        : "Base RTT",
+                    value: latencyValueText(telemetry: telemetry),
+                    subtitle: latencySubtitleText(telemetry: telemetry),
                     icon: "gauge.medium",
                     color: .yellow
                 )
 
                 bentoTile(
                     title: "Connection",
-                    value: telemetry.interfaceType,
-                    subtitle: telemetry.protocolName.isEmpty ? telemetry.clientIP : "\(telemetry.protocolName) · \(telemetry.clientIP)",
-                    icon: telemetry.interfaceType == "Ethernet" ? "cable.connector" : "wifi",
+                    value: telemetry?.interfaceType ?? engine.primaryInterfaceType.rawValue,
+                    subtitle: telemetry?.protocolName.isEmpty == false ? "\(telemetry!.protocolName) · \(telemetry!.clientIP)" : (telemetry?.clientIP ?? "macOS Native"),
+                    icon: engine.activeInterfaceIcon,
                     color: .secondary
                 )
             }
 
             bentoServerTile(telemetry: telemetry)
 
-            if telemetry.workingLatencyMs > 0 || telemetry.tcpHandshakeMs > 0 {
-                bentoDiagnosticsTile(telemetry: telemetry)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            bentoDiagnosticsTile(telemetry: telemetry)
         }
     }
 
-    private var idleBentoGrid: some View {
-        VStack(spacing: DroppySpacing.smd) {
-            HStack(spacing: DroppySpacing.smd) {
-                bentoTile(
-                    title: "Engine",
-                    value: "Apple CDN",
-                    subtitle: "macOS networkQuality",
-                    icon: "apple.logo",
-                    color: .cyan
-                )
-
-                bentoTile(
-                    title: "Link",
-                    value: engine.history.first?.clientISP ?? "Active Interface",
-                    subtitle: "Zero overhead · Native",
-                    icon: "network",
-                    color: .secondary
-                )
-            }
-
-            VStack(alignment: .leading, spacing: DroppySpacing.xsm) {
-                HStack(spacing: 5) {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.cyan)
-                    Text("Telemetry Capabilities")
-                        .font(.system(size: 10, weight: .regular))
-                        .foregroundStyle(.cyan)
-                }
-
-                HStack(alignment: .top, spacing: DroppySpacing.md) {
-                    idleCapabilityItem(title: "Throughput", desc: "Download & Upload capacity")
-                    idleCapabilityItem(title: "Bufferbloat", desc: "Latency under heavy load")
-                    idleCapabilityItem(title: "Responsiveness", desc: "Apple RPM rating")
-                }
-            }
-            .padding(DroppySpacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
-
-            if let last = engine.history.first {
-                VStack(alignment: .leading, spacing: DroppySpacing.xsm) {
-                    HStack {
-                        HStack(spacing: 5) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.yellow)
-                            Text("Last Recorded Test")
-                                .font(.system(size: 10, weight: .regular))
-                                .foregroundStyle(.yellow)
-                        }
-                        Spacer()
-                        Text(last.timestamp.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
-                            .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack(spacing: DroppySpacing.lg) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.green)
-                            Text(engine.speedUnit.format(mbps: last.downloadMbps))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.green)
-                                .monospacedDigit()
-                        }
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.purple)
-                            Text(engine.speedUnit.format(mbps: last.uploadMbps))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.purple)
-                                .monospacedDigit()
-                        }
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "gauge.medium")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.yellow)
-                            Text(String(format: "%.0f ms", last.pingMs))
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                                .monospacedDigit()
-                        }
-                    }
-                }
-                .padding(DroppySpacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
-            } else {
-                VStack(alignment: .leading, spacing: DroppySpacing.xsm) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bolt.shield.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.teal)
-                        Text("Ready to Benchmark")
-                            .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(.teal)
-                    }
-                    Text("Click Start Speedtest to measure bidirectional bandwidth, loaded latency, and network responsiveness against Apple's edge servers.")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(DroppySpacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
-            }
+    private func latencyValueText(telemetry: SpeedtestTelemetry?) -> String {
+        if let telemetry, telemetry.pingMs > 0, !isDownloadPhase {
+            return String(format: "%.1f ms", telemetry.pingMs)
+        } else if case .locating = engine.phase {
+            return "Finding…"
+        } else if case .pinging = engine.phase {
+            return "Pinging…"
+        } else {
+            return "-- ms"
         }
     }
 
-    private func idleCapabilityItem(title: String, desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            Text(desc)
-                .font(.system(size: 9, weight: .regular))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    private func latencySubtitleText(telemetry: SpeedtestTelemetry?) -> String {
+        guard let telemetry else { return "Base RTT" }
+        return telemetry.responsivenessRPM > 0
+            ? String(format: "%.0f RPM (%@)", telemetry.responsivenessRPM, rpmRating(telemetry.responsivenessRPM))
+            : "Base RTT"
     }
 
     private func bentoTile(
@@ -489,7 +336,7 @@ public struct WarpExpandedSurfaceView: View {
         .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
     }
 
-    private func bentoServerTile(telemetry: SpeedtestTelemetry) -> some View {
+    private func bentoServerTile(telemetry: SpeedtestTelemetry?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "server.rack")
@@ -499,10 +346,10 @@ public struct WarpExpandedSurfaceView: View {
                     .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(.teal)
             }
-            Text(telemetry.serverSponsor.isEmpty ? (telemetry.serverName.isEmpty ? "Apple Edge CDN" : telemetry.serverName) : telemetry.serverSponsor)
+            Text(serverTitleText(telemetry: telemetry))
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
-            Text(telemetry.serverHost.isEmpty ? telemetry.serverName : telemetry.serverHost)
+            Text(serverSubtitleText(telemetry: telemetry))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -512,7 +359,29 @@ public struct WarpExpandedSurfaceView: View {
         .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
     }
 
-    private func bentoDiagnosticsTile(telemetry: SpeedtestTelemetry) -> some View {
+    private func serverTitleText(telemetry: SpeedtestTelemetry?) -> String {
+        if let telemetry, !telemetry.serverSponsor.isEmpty {
+            return telemetry.serverSponsor
+        } else if let telemetry, !telemetry.serverName.isEmpty {
+            return telemetry.serverName
+        } else if case .locating = engine.phase {
+            return "Locating server…"
+        } else {
+            return "Apple Edge CDN"
+        }
+    }
+
+    private func serverSubtitleText(telemetry: SpeedtestTelemetry?) -> String {
+        if let telemetry, !telemetry.serverHost.isEmpty {
+            return telemetry.serverHost
+        } else if let telemetry, !telemetry.serverName.isEmpty {
+            return telemetry.serverName
+        } else {
+            return "macOS networkQuality"
+        }
+    }
+
+    private func bentoDiagnosticsTile(telemetry: SpeedtestTelemetry?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "waveform.path.ecg")
@@ -522,7 +391,7 @@ public struct WarpExpandedSurfaceView: View {
                     .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(.cyan)
             }
-            if telemetry.workingLatencyMs > 0 {
+            if let telemetry, telemetry.workingLatencyMs > 0 {
                 HStack(spacing: 4) {
                     Text("Bufferbloat latency:")
                         .font(.system(size: 10, weight: .regular))
@@ -534,8 +403,7 @@ public struct WarpExpandedSurfaceView: View {
                         .contentTransition(.numericText())
                         .animation(.smooth(duration: 0.3), value: telemetry.workingLatencyMs)
                 }
-            }
-            if telemetry.tcpHandshakeMs > 0 {
+            } else if let telemetry, telemetry.tcpHandshakeMs > 0 {
                 HStack(spacing: 4) {
                     Text("Handshakes:")
                         .font(.system(size: 10, weight: .regular))
@@ -545,6 +413,10 @@ public struct WarpExpandedSurfaceView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
+            } else {
+                Text(isTesting ? "Evaluating loaded latency…" : "Standard responsiveness benchmark")
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(DroppySpacing.md)

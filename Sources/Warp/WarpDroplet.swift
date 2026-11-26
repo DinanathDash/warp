@@ -28,7 +28,6 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     private var engineCancellable: AnyCancellable?
     private var layoutCancellable: AnyCancellable?
     private var expandedSurfacePresentation: ExpandedSurfacePresentation?
-    private var measuredExpandedHeight: CGFloat?
     private var lastObservedPhase: SpeedtestPhase = .idle
 
     public override init() {
@@ -85,14 +84,6 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     public func dismissExpandedSurface() {
         host?.notchSurface.dismissExpandedSurface(Self.expandedSurfaceID)
         expandedSurfacePresentation = nil
-        measuredExpandedHeight = nil
-    }
-
-    fileprivate func updateMeasuredExpandedHeight(_ height: CGFloat) {
-        let rounded = ceil(height)
-        guard rounded >= 180, abs(rounded - (measuredExpandedHeight ?? 0)) > 0.5 else { return }
-        measuredExpandedHeight = rounded
-        objectWillChange.send()
     }
 
     public func collapseToHUD() {
@@ -123,11 +114,10 @@ extension WarpDroplet: ShelfWidgetProviding {
                 title: "Warp",
                 systemImage: "speedometer",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: WarpShelfWidgetView.preferredSoloWidth,
-                    preferredPairedWidth: WarpShelfWidgetView.preferredPairedWidth,
-                    pairWeight: WarpShelfWidgetView.pairWeight,
-                    minimumWidth: WarpShelfWidgetView.minimumWidth,
-                    contentHeight: .fixed(WarpShelfWidgetView.contentHeight)
+                    preferredSoloWidth: 380,
+                    preferredPairedWidth: 190,
+                    contentHeight: .fixed(WarpShelfWidgetView.contentHeight),
+                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 70)
                 ),
                 searchKeywords: ["speedtest", "speed", "bandwidth", "network", "ping", "gauge"]
             )
@@ -183,9 +173,6 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
             },
             onOpenSettings: { [weak self] in
                 self?.openSettings()
-            },
-            onMeasuredHeight: { [weak self] height in
-                self?.updateMeasuredExpandedHeight(height)
             }
         ))
     }
@@ -194,19 +181,7 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         _ id: ExpandedSurfaceID,
         fitting proposal: ExpandedSurfaceSizeProposal
     ) -> CGSize? {
-        let hasDiagnosticsRow: Bool
-        if let telemetry = engine.currentTelemetry,
-           telemetry.downloadMbps > 0,
-           (telemetry.workingLatencyMs > 0 || telemetry.tcpHandshakeMs > 0) {
-            hasDiagnosticsRow = true
-        } else {
-            hasDiagnosticsRow = false
-        }
-        let fallbackHeight: CGFloat = hasDiagnosticsRow ? 344 : 272
-        return CGSize(
-            width: WarpExpandedSurfaceView.preferredWidth,
-            height: measuredExpandedHeight ?? fallbackHeight
-        )
+        CGSize(width: 560, height: 340)
     }
 
     public func expandedSurfaceDidDismiss(
@@ -217,6 +192,5 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         if expandedSurfacePresentation?.id == presentation.id {
             expandedSurfacePresentation = nil
         }
-        measuredExpandedHeight = nil
     }
 }

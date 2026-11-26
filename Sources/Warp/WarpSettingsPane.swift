@@ -37,13 +37,33 @@ public struct WarpSettingsPane: View {
                     icon: "speedometer",
                     infoTip: "Choose between Megabits per second (standard) or Megabytes per second."
                 ) {
-                    Picker("", selection: $engine.speedUnit) {
-                        ForEach(SpeedUnit.allCases, id: \.self) { unit in
-                            Text(unit.displayName).tag(unit)
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("", selection: $engine.speedUnit) {
+                            ForEach(SpeedUnit.allCases, id: \.self) { unit in
+                                Text(unit.displayName).tag(unit)
+                            }
                         }
+                        .labelsHidden()
+                        .fixedSize()
                     }
-                    .labelsHidden()
-                    .frame(width: 170)
+                }
+
+                DropletControlRow(
+                    title: "Test duration",
+                    icon: "timer",
+                    infoTip: "Choose the target speedtest duration. Longer tests provide higher accuracy for high-bandwidth connections."
+                ) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("", selection: $engine.testDuration) {
+                            ForEach(TestDuration.allCases, id: \.self) { duration in
+                                Text(duration.displayName).tag(duration)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
                 }
 
                 DropletToggleRow(

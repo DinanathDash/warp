@@ -48,6 +48,32 @@ public enum SpeedUnit: String, CaseIterable, Codable, Sendable {
     }
 }
 
+public enum TestDuration: Int, CaseIterable, Codable, Sendable {
+    case sec15 = 15
+    case sec30 = 30
+    case sec45 = 45
+    case min1 = 60
+    case min1_30 = 90
+    case min2 = 120
+
+    public var displayName: String {
+        switch self {
+        case .sec15: return "15 seconds"
+        case .sec30: return "30 seconds"
+        case .sec45: return "45 seconds"
+        case .min1: return "1 minute"
+        case .min1_30: return "1m 30s"
+        case .min2: return "2 minutes"
+        }
+    }
+
+    public var perPhaseSeconds: Int {
+        // networkQuality runs sequentially: download then upload.
+        // Total test duration is split evenly between the two phases.
+        max(5, rawValue / 2)
+    }
+}
+
 public enum SpeedtestPhase: Equatable, Sendable {
     case idle
     case locating

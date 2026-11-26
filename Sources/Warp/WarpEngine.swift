@@ -7,6 +7,7 @@ import AppKit
 import Combine
 @_weakLinked import DroppyKit
 import Foundation
+import Network
 import OSLog
 
 
@@ -147,6 +148,9 @@ public final class WarpEngine: ObservableObject {
     @Published public var showHUDOnFinish: Bool = true {
         didSet { savePreferences() }
     }
+    @Published public var testDuration: TestDuration = .sec30 {
+        didSet { savePreferences() }
+    }
     private var isLoadingPreferences = false
 
     @Published public var retainLastResult: Bool = true {
@@ -157,11 +161,45 @@ public final class WarpEngine: ObservableObject {
         }
     }
 
+    public enum NetworkInterfaceKind: String, Sendable {
+        case wifi = "Wi-Fi"
+        case ethernet = "Ethernet"
+        case cellular = "Cellular"
+        case other = "Other"
+
+        public var systemImage: String {
+            switch self {
+            case .wifi: return "wifi"
+            case .ethernet: return "cable.connector"
+            case .cellular: return "antenna.radiowaves.left.and.right"
+            case .other: return "network"
+            }
+        }
+    }
+
+    @Published public private(set) var primaryInterfaceType: NetworkInterfaceKind = .wifi
+    private var pathMonitor: NWPathMonitor?
+    private let monitorQueue = DispatchQueue(label: "com.warp.pathMonitor", qos: .utility)
+
     public static let defaultNativeExecutable = "/usr/bin/networkQuality"
     @Published public private(set) var detectedCLIPath: String?
 
     public var isNativeEngine: Bool {
         detectedCLIPath == Self.defaultNativeExecutable
+    }
+
+    public var activeInterfaceIcon: String {
+        if let telemetry = currentTelemetry ?? lastTelemetry, !telemetry.interfaceType.isEmpty {
+            let lower = telemetry.interfaceType.lowercased()
+            if lower.contains("ethernet") || lower.contains("wired") {
+                return "cable.connector"
+            } else if lower.contains("cellular") {
+                return "antenna.radiowaves.left.and.right"
+            } else {
+                return "wifi"
+            }
+        }
+        return primaryInterfaceType.systemImage
     }
 
     public var latestRecordedStats: LatestStats? {
@@ -212,6 +250,27 @@ public final class WarpEngine: ObservableObject {
 
     public init() {
         detectCLI()
+        startPathMonitor()
+    }
+
+    private func startPathMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if path.usesInterfaceType(.wiredEthernet) {
+                    self.primaryInterfaceType = .ethernet
+                } else if path.usesInterfaceType(.cellular) {
+                    self.primaryInterfaceType = .cellular
+                } else if path.usesInterfaceType(.wifi) {
+                    self.primaryInterfaceType = .wifi
+                } else {
+                    self.primaryInterfaceType = .other
+                }
+            }
+        }
+        monitor.start(queue: monitorQueue)
+        self.pathMonitor = monitor
     }
 
     // MARK: - Lifecycle
@@ -232,6 +291,8 @@ public final class WarpEngine: ObservableObject {
     }
 
     deinit {
+        pathMonitor?.cancel()
+        pathMonitor = nil
         gaugeSimulationTimer?.invalidate()
         autoResetTask?.cancel()
         activeTestTask?.cancel()
@@ -276,8 +337,10 @@ public final class WarpEngine: ObservableObject {
         phase = .locating
         currentGaugeSpeed = 0.0
         displayedGaugeSpeed = 0.0
-        testProgress = 0.02
-        estimatedRemainingSeconds = max(1, Int(ceil(estimatedDownloadDuration + estimatedUploadDuration)))
+        let maxPhaseSeconds = testDuration.perPhaseSeconds
+        let phaseTimeout = Double(maxPhaseSeconds + 10)
+
+        estimatedRemainingSeconds = max(1, testDuration.rawValue)
         downloadPhaseStart = nil
         uploadPhaseStart = nil
         lastDisplayNumberUpdate = .distantPast
@@ -294,21 +357,16 @@ public final class WarpEngine: ObservableObject {
                 self.phase = .downloading(currentMbps: 1.0)
                 let (dlStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-u"],
-                    timeoutSeconds: 35
+                    arguments: ["-c", "-v", "-u", "-M", "\(maxPhaseSeconds)"],
+                    timeoutSeconds: phaseTimeout
                 )
 
                 try Task.checkCancellation()
 
                 if let dlStart = self.downloadPhaseStart {
-                    let measured = max(4.0, min(34.0, Date().timeIntervalSince(dlStart)))
-                    self.estimatedDownloadDuration = self.hasMeasuredDownload
-                        ? (self.estimatedDownloadDuration * 0.4 + measured * 0.6)
-                        : measured
+                    let measured = max(4.0, Date().timeIntervalSince(dlStart))
+                    self.estimatedDownloadDuration = measured
                     self.hasMeasuredDownload = true
-                    if !self.hasMeasuredUpload {
-                        self.estimatedUploadDuration = max(self.estimatedUploadDuration, min(32.0, measured * 1.6))
-                    }
                 }
 
                 guard let dlJsonData = dlStdout.data(using: .utf8) else {
@@ -324,7 +382,7 @@ public final class WarpEngine: ObservableObject {
                 self.displayedGaugeSpeed = dlTelemetry.downloadMbps
                 self.lastDisplayNumberUpdate = Date()
                 self.testProgress = 0.50
-                self.estimatedRemainingSeconds = max(1, Int(ceil(self.estimatedUploadDuration)))
+                self.estimatedRemainingSeconds = max(1, maxPhaseSeconds)
                 WarpLog.info("Download completed: \(dlTelemetry.downloadMbps) Mbps, Ping \(dlTelemetry.pingMs) ms")
 
                 self.uploadPhaseStart = Date()
@@ -332,17 +390,15 @@ public final class WarpEngine: ObservableObject {
 
                 let (ulStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-d"],
-                    timeoutSeconds: 35
+                    arguments: ["-c", "-v", "-d", "-M", "\(maxPhaseSeconds)"],
+                    timeoutSeconds: phaseTimeout
                 )
 
                 try Task.checkCancellation()
 
                 if let ulStart = self.uploadPhaseStart {
-                    let measured = max(5.0, min(34.0, Date().timeIntervalSince(ulStart)))
-                    self.estimatedUploadDuration = self.hasMeasuredUpload
-                        ? (self.estimatedUploadDuration * 0.4 + measured * 0.6)
-                        : measured
+                    let measured = max(4.0, Date().timeIntervalSince(ulStart))
+                    self.estimatedUploadDuration = measured
                     self.hasMeasuredUpload = true
                 }
 
@@ -786,6 +842,10 @@ public final class WarpEngine: ObservableObject {
         if let hud = preferences.value(forKey: "warp.showHUDOnFinish", as: Bool.self) {
             showHUDOnFinish = hud
         }
+        if let durVal = preferences.value(forKey: "warp.testDuration", as: Int.self),
+           let dur = TestDuration(rawValue: durVal) {
+            testDuration = dur
+        }
         if let retain = preferences.value(forKey: "warp.retainLastResult", as: Bool.self) {
             retainLastResult = retain
         }
@@ -796,12 +856,12 @@ public final class WarpEngine: ObservableObject {
             lastTelemetry = savedTelemetry
         }
         if let savedDlDuration = preferences.value(forKey: "warp.estimatedDownloadDuration", as: Double.self),
-           savedDlDuration >= 4.0 && savedDlDuration <= 35.0 {
+           savedDlDuration >= 4.0 && savedDlDuration <= 130.0 {
             estimatedDownloadDuration = savedDlDuration
             hasMeasuredDownload = true
         }
         if let savedUlDuration = preferences.value(forKey: "warp.estimatedUploadDuration", as: Double.self),
-           savedUlDuration >= 5.0 && savedUlDuration <= 35.0 {
+           savedUlDuration >= 4.0 && savedUlDuration <= 130.0 {
             estimatedUploadDuration = savedUlDuration
             hasMeasuredUpload = true
         }
@@ -822,6 +882,7 @@ public final class WarpEngine: ObservableObject {
         preferences.setValue(speedUnit.rawValue, forKey: "warp.speedUnit")
         preferences.setValue(customCLIPath.isEmpty ? nil : customCLIPath, forKey: "warp.customCLIPath")
         preferences.setValue(showHUDOnFinish, forKey: "warp.showHUDOnFinish")
+        preferences.setValue(testDuration.rawValue, forKey: "warp.testDuration")
         preferences.setValue(retainLastResult, forKey: "warp.retainLastResult")
         preferences.setValue(history.isEmpty ? nil : history, forKey: "warp.history")
         preferences.setValue(retainLastResult ? (currentTelemetry ?? lastTelemetry) : nil, forKey: "warp.lastTelemetry")
