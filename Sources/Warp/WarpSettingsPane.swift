@@ -111,23 +111,23 @@ public struct WarpSettingsPane: View {
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.down")
                                         .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.55))
+                                        .foregroundStyle(.green)
                                     Text(engine.speedUnit.format(mbps: item.downloadMbps))
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .monospacedDigit()
                                 }
 
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(Color(red: 0.85, green: 0.60, blue: 1.0))
+                                        .foregroundStyle(.purple)
                                     Text(engine.speedUnit.format(mbps: item.uploadMbps))
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .monospacedDigit()
                                 }
 
                                 Text(String(format: "%.0f ms", item.pingMs))
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.yellow)
                                     .monospacedDigit()
                             }

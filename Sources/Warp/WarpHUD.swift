@@ -21,7 +21,7 @@ enum WarpHUD {
         let card = DropletHUDCard(
             title: "Speedtest Complete",
             message: "Download: \(dlStr) · Upload: \(ulStr) · Ping: \(pingStr)",
-            systemImage: "gauge.with.needle.fill",
+            systemImage: "speedometer",
             tint: Color(white: 0.82),
             progress: nil,
             actions: [
@@ -40,13 +40,14 @@ enum WarpHUD {
             card: card,
             isExpanded: true
         ) {
-            Image(systemName: "gauge.with.needle.fill")
+            Image(systemName: "speedometer")
                 .font(.system(size: DroppyLiveActivityMetrics.iconSize, weight: .semibold))
                 .foregroundStyle(Color(white: 0.82))
         } trailing: {
             HStack(spacing: 4) {
                 Text(dlStr)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
                     .foregroundStyle(.white)
             }
         }

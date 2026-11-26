@@ -26,7 +26,9 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     public private(set) var host: DropletHost?
 
     private var engineCancellable: AnyCancellable?
+    private var layoutCancellable: AnyCancellable?
     private var expandedSurfacePresentation: ExpandedSurfacePresentation?
+    private var measuredExpandedHeight: CGFloat?
     private var lastObservedPhase: SpeedtestPhase = .idle
 
     public override init() {
@@ -37,6 +39,14 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
             self.objectWillChange.send()
             self.handleEngineChange()
         }
+
+        // Emit after @Published telemetry/phase mutations commit so the host
+        // reads fresh expandedSurfaceSize values when bento rows enter or leave.
+        layoutCancellable = Publishers.CombineLatest(engine.$currentTelemetry, engine.$phase)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _ in
+                self?.objectWillChange.send()
+            }
     }
 
     public func activate(host: DropletHost) throws {
@@ -75,6 +85,14 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     public func dismissExpandedSurface() {
         host?.notchSurface.dismissExpandedSurface(Self.expandedSurfaceID)
         expandedSurfacePresentation = nil
+        measuredExpandedHeight = nil
+    }
+
+    fileprivate func updateMeasuredExpandedHeight(_ height: CGFloat) {
+        let rounded = ceil(height)
+        guard rounded >= 180, abs(rounded - (measuredExpandedHeight ?? 0)) > 0.5 else { return }
+        measuredExpandedHeight = rounded
+        objectWillChange.send()
     }
 
     public func collapseToHUD() {
@@ -103,12 +121,13 @@ extension WarpDroplet: ShelfWidgetProviding {
             ShelfWidgetDescriptor(
                 id: Self.widgetID,
                 title: "Warp",
-                systemImage: "gauge.with.needle.fill",
+                systemImage: "speedometer",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: 380,
-                    preferredPairedWidth: 190,
-                    contentHeight: .fixed(WarpShelfWidgetView.contentHeight),
-                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 70)
+                    preferredSoloWidth: WarpShelfWidgetView.preferredSoloWidth,
+                    preferredPairedWidth: WarpShelfWidgetView.preferredPairedWidth,
+                    pairWeight: WarpShelfWidgetView.pairWeight,
+                    minimumWidth: WarpShelfWidgetView.minimumWidth,
+                    contentHeight: .fixed(WarpShelfWidgetView.contentHeight)
                 ),
                 searchKeywords: ["speedtest", "speed", "bandwidth", "network", "ping", "gauge"]
             )
@@ -147,7 +166,7 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
             ExpandedSurfaceDescriptor(
                 id: Self.expandedSurfaceID,
                 title: "Speedtest",
-                systemImage: "gauge.with.needle.fill",
+                systemImage: "speedometer",
                 suppresses: [.shelfWidgets, .autoCollapse]
             )
         ]
@@ -164,6 +183,9 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
             },
             onOpenSettings: { [weak self] in
                 self?.openSettings()
+            },
+            onMeasuredHeight: { [weak self] height in
+                self?.updateMeasuredExpandedHeight(height)
             }
         ))
     }
@@ -172,6 +194,29 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         _ id: ExpandedSurfaceID,
         fitting proposal: ExpandedSurfaceSizeProposal
     ) -> CGSize? {
-        CGSize(width: 560, height: 340)
+        let hasDiagnosticsRow: Bool
+        if let telemetry = engine.currentTelemetry,
+           telemetry.downloadMbps > 0,
+           (telemetry.workingLatencyMs > 0 || telemetry.tcpHandshakeMs > 0) {
+            hasDiagnosticsRow = true
+        } else {
+            hasDiagnosticsRow = false
+        }
+        let fallbackHeight: CGFloat = hasDiagnosticsRow ? 344 : 272
+        return CGSize(
+            width: WarpExpandedSurfaceView.preferredWidth,
+            height: measuredExpandedHeight ?? fallbackHeight
+        )
+    }
+
+    public func expandedSurfaceDidDismiss(
+        _ id: ExpandedSurfaceID,
+        presentation: ExpandedSurfacePresentation,
+        reason: ExpandedSurfaceDismissalReason
+    ) {
+        if expandedSurfacePresentation?.id == presentation.id {
+            expandedSurfacePresentation = nil
+        }
+        measuredExpandedHeight = nil
     }
 }
