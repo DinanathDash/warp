@@ -61,7 +61,6 @@ jobs:
 
       - name: Build Droplet
         run: |
-          sed -i '' 's/>\/dev\/null//g' ../droppykit/Scripts/build-droplet.sh
           # Patch unreleased SDK API in DroppyKit so it compiles on macOS 26 runners
           sed -i '' 's/\.pickerStyle(\.tabs)/\.pickerStyle(\.segmented)/g' ../droppykit/Sources/DroppyKit/DesignSystem/SegmentedPicker.swift
           droppykit build
