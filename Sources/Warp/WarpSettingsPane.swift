@@ -52,6 +52,13 @@ public struct WarpSettingsPane: View {
                     subtitle: "Display a compact speedtest result HUD on your screen when a test completes.",
                     isOn: $engine.showHUDOnFinish
                 )
+
+                DropletToggleRow(
+                    title: "Retain last result on shelf",
+                    icon: "clock.arrow.circlepath",
+                    subtitle: "Keep the last test result with a Test Again button on the shelf instead of resetting to the GO screen when inactive.",
+                    isOn: $engine.retainLastResult
+                )
             }
         }
     }

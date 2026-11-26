@@ -137,6 +137,15 @@ public final class WarpEngine: ObservableObject {
     @Published public var showHUDOnFinish: Bool = true {
         didSet { savePreferences() }
     }
+    private var isLoadingPreferences = false
+
+    @Published public var retainLastResult: Bool = true {
+        didSet {
+            guard !isLoadingPreferences else { return }
+            handleRetainSettingChange()
+            savePreferences()
+        }
+    }
 
     public static let defaultNativeExecutable = "/usr/bin/networkQuality"
     @Published public private(set) var detectedCLIPath: String?
@@ -148,6 +157,7 @@ public final class WarpEngine: ObservableObject {
     private var activeTestTask: Task<Void, Never>?
     private var gaugeSimulationTimer: Timer?
     private var currentControl: ProcessControl?
+    private var lastTelemetry: SpeedtestTelemetry?
     private weak var preferences: (any DropletPreferencesService)?
 
     public init() {
@@ -289,6 +299,7 @@ public final class WarpEngine: ObservableObject {
                 )
 
                 self.stopGaugeSimulation()
+                self.lastTelemetry = finalTelemetry
                 self.currentTelemetry = finalTelemetry
                 self.currentGaugeSpeed = finalTelemetry.downloadMbps
                 self.phase = .completed
@@ -336,17 +347,58 @@ public final class WarpEngine: ObservableObject {
     }
 
     private func scheduleAutoReset() {
+        guard !retainLastResult else { return }
         guard !isShelfVisible && !isExpandedVisible else { return }
         autoResetTask?.cancel()
         autoResetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 14_000_000_000)
             guard !Task.isCancelled, let self, self.phase == .completed else { return }
+            guard !self.retainLastResult else { return }
             guard !self.isShelfVisible && !self.isExpandedVisible else { return }
             self.phase = .idle
             self.currentTelemetry = nil
             self.currentGaugeSpeed = 0.0
             WarpLog.info("Shelf result auto-dismissed back to idle while out of view")
         }
+    }
+
+    private func handleRetainSettingChange() {
+        autoResetTask?.cancel()
+        autoResetTask = nil
+        if !retainLastResult {
+            if phase == .completed {
+                phase = .idle
+                currentTelemetry = nil
+                currentGaugeSpeed = 0.0
+            }
+        } else {
+            if currentTelemetry == nil, let last = resolvedLastTelemetry {
+                currentTelemetry = last
+                phase = .completed
+                currentGaugeSpeed = last.downloadMbps
+            }
+        }
+    }
+
+    private var resolvedLastTelemetry: SpeedtestTelemetry? {
+        if let lastTelemetry { return lastTelemetry }
+        guard let first = history.first else { return nil }
+        return SpeedtestTelemetry(
+            downloadMbps: first.downloadMbps,
+            uploadMbps: first.uploadMbps,
+            pingMs: first.pingMs,
+            serverName: first.serverName,
+            serverSponsor: "Apple Edge CDN",
+            serverCountry: "macOS Native",
+            serverDistanceKm: 0,
+            serverHost: first.serverName,
+            clientIP: "",
+            clientISP: first.clientISP,
+            clientCountry: "",
+            bytesReceived: 0,
+            bytesSent: 0,
+            timestamp: first.timestamp
+        )
     }
 
     public func cancelTest() {
@@ -543,13 +595,29 @@ public final class WarpEngine: ObservableObject {
         savePreferences()
     }
 
+    public var onHistoryCleared: (() -> Void)?
+
     public func clearHistory() {
         history.removeAll()
+        lastTelemetry = nil
+        currentTelemetry = nil
+        currentGaugeSpeed = 0.0
+        phase = .idle
+        autoResetTask?.cancel()
+        autoResetTask = nil
+        if let preferences {
+            preferences.setValue(nil as [WarpHistoryItem]?, forKey: "warp.history")
+            preferences.setValue(nil as SpeedtestTelemetry?, forKey: "warp.lastTelemetry")
+        }
         savePreferences()
+        onHistoryCleared?()
     }
 
     private func loadPreferences() {
         guard let preferences else { return }
+        isLoadingPreferences = true
+        defer { isLoadingPreferences = false }
+
         if let unitStr = preferences.value(forKey: "warp.speedUnit", as: String.self),
            let unit = SpeedUnit(rawValue: unitStr) {
             speedUnit = unit
@@ -560,16 +628,31 @@ public final class WarpEngine: ObservableObject {
         if let hud = preferences.value(forKey: "warp.showHUDOnFinish", as: Bool.self) {
             showHUDOnFinish = hud
         }
+        if let retain = preferences.value(forKey: "warp.retainLastResult", as: Bool.self) {
+            retainLastResult = retain
+        }
         if let savedHistory = preferences.value(forKey: "warp.history", as: [WarpHistoryItem].self) {
             history = savedHistory
+        }
+        if let savedTelemetry = preferences.value(forKey: "warp.lastTelemetry", as: SpeedtestTelemetry.self) {
+            lastTelemetry = savedTelemetry
+        }
+        if retainLastResult && currentTelemetry == nil && phase == .idle {
+            if let last = resolvedLastTelemetry {
+                currentTelemetry = last
+                phase = .completed
+                currentGaugeSpeed = last.downloadMbps
+            }
         }
     }
 
     private func savePreferences() {
-        guard let preferences else { return }
+        guard !isLoadingPreferences, let preferences else { return }
         preferences.setValue(speedUnit.rawValue, forKey: "warp.speedUnit")
         preferences.setValue(customCLIPath.isEmpty ? nil : customCLIPath, forKey: "warp.customCLIPath")
         preferences.setValue(showHUDOnFinish, forKey: "warp.showHUDOnFinish")
+        preferences.setValue(retainLastResult, forKey: "warp.retainLastResult")
         preferences.setValue(history.isEmpty ? nil : history, forKey: "warp.history")
+        preferences.setValue(retainLastResult ? (currentTelemetry ?? lastTelemetry) : nil, forKey: "warp.lastTelemetry")
     }
 }

@@ -84,7 +84,7 @@ public struct WarpShelfWidgetView: View {
                 Spacer(minLength: 0)
                 expandButton
             }
-            .frame(height: 24)
+            .frame(height: 28)
         }
     }
 
@@ -101,7 +101,7 @@ public struct WarpShelfWidgetView: View {
                 usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
             )
         )
-        .offset(y: 2)
+        .padding(.top, 4)
         .help("Warp settings")
     }
 
@@ -118,7 +118,7 @@ public struct WarpShelfWidgetView: View {
                 usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
             )
         )
-        .offset(y: 2)
+        .padding(.top, 4)
         .help("Open full notch speedtest")
     }
 
@@ -212,19 +212,15 @@ public struct WarpShelfWidgetView: View {
                     }
                 } label: {
                     Text("GO")
-                        .font(.system(size: max(13, dialSize * 0.13), weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .frame(width: dialSize * 0.42, height: dialSize * 0.42)
-                        .background(
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                        )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(
+                    DroppyWashCircleButtonStyle(
+                        diameter: dialSize * 0.42,
+                        tone: .neutral,
+                        glyphSize: max(13, dialSize * 0.14),
+                        usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+                    )
+                )
                 .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
         }

@@ -46,6 +46,10 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
         host.log.info("Warp activated")
 
         engine.attach(preferences: host.preferences)
+        engine.onHistoryCleared = { [weak self] in
+            guard let self else { return }
+            self.host?.hud.dismiss(id: WarpHUD.resultHUDID)
+        }
     }
 
     public func deactivate() {
@@ -168,6 +172,6 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         _ id: ExpandedSurfaceID,
         fitting proposal: ExpandedSurfaceSizeProposal
     ) -> CGSize? {
-        CGSize(width: 560, height: 410)
+        CGSize(width: 560, height: 340)
     }
 }
