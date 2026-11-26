@@ -1,0 +1,54 @@
+{
+  "id": "warp",
+  "name": "Warp",
+  "version": "1.0.0",
+  "summary": "Live network speedtest with gauge meter in your notch",
+  "description": "Warp brings the speedtest gauge meter to your Mac's notch and shelf. Measure download, upload, ping, and network telemetry in real time with an animated speedometer needle and dynamic arc gauge.\n\nWarp is powered directly by macOS native networkQuality with zero external dependencies. No Python, Homebrew, or external tools required. Built entirely non-blocking and crash-proof, your Mac stays responsive and smooth while running high-speed network tests.",
+  "category": "System",
+  "kit": {
+    "abi": 1,
+    "minAPI": "1.28.0"
+  },
+  "minAppVersion": "15.3.0",
+  "capabilities": [
+    "network-client",
+    "hud",
+    "expanded-surface"
+  ],
+  "capabilityReasons": {
+    "network-client": "Performs network bandwidth and latency tests to measure internet speed."
+  },
+  "surfaces": [
+    "shelf-widget",
+    "expanded-surface",
+    "settings-pane",
+    "hud"
+  ],
+  "icon": "Warp.icon",
+  "creator": {
+    "name": "Dinanath Dash",
+    "kind": "community",
+    "url": "https://dinanath.dev",
+    "avatar": "Creator.png",
+    "gitlab": "DinanathDash"
+  },
+  "source": {
+    "repository": "https://gitlab.com/droppyformac1/droplets/-/tree/main/droplets/warp",
+    "license": "MIT"
+  },
+  "screenshots": [],
+  "keywords": [
+    "speedtest",
+    "speed",
+    "network",
+    "bandwidth",
+    "ping",
+    "latency",
+    "download",
+    "upload",
+    "wifi",
+    "internet",
+    "meter",
+    "gauge"
+  ]
+}

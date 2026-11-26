@@ -1,0 +1,52 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.11371,0.11371,0.11371,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : null,
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "display-p3:0.36833,0.38363,0.92726,1.00000"
+          },
+          "image-name" : "Gauge.svg",
+          "name" : "Gauge"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "display-p3:0.87451,0.87451,0.88519,1.00000"
+          },
+          "image-name" : "Pointer.svg",
+          "name" : "Pointer"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
