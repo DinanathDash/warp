@@ -63,6 +63,23 @@ jobs:
         run: |
           # Patch unreleased SDK API in DroppyKit so it compiles on macOS 26 runners
           sed -i '' 's/\.pickerStyle(\.tabs)/\.pickerStyle(\.segmented)/g' ../droppykit/Sources/DroppyKit/DesignSystem/SegmentedPicker.swift
+
+          # Inject pre-compilation checkout patch into build-droplet.sh
+          python3 -c "
+          with open('../droppykit/Scripts/build-droplet.sh', 'r') as f:
+              lines = f.readlines()
+          for idx, line in enumerate(lines):
+              if 'for slice in \$SLICES; do' in line and idx > 200:
+                  patch = '''    swift package --scratch-path \"\$BUILD_ROOT/droplet-\$slice\" resolve 2>/dev/null || true\n    find \"\$BUILD_ROOT/droplet-\$slice\" -name \"SegmentedPicker.swift\" -exec sed -i '' 's/\\\\.pickerStyle(\\\\.tabs)/\\\\.pickerStyle(\\\\.segmented)/g' {} + 2>/dev/null || true\n'''
+                  lines.insert(idx + 1, patch)
+                  break
+          for idx, line in enumerate(lines):
+              if idx > 250 and line.strip() == '>/dev/null':
+                  lines[idx] = ''
+                  break
+          with open('../droppykit/Scripts/build-droplet.sh', 'w') as f:
+              f.writelines(lines)
+          "
           droppykit build
 
       - name: Validate Droplet
