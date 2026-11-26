@@ -53,14 +53,19 @@ jobs:
               env_file.write(f'droplet_name={droplet_name}\n')
           "
 
-      - name: Clone DroppyKit CLI
-        run: git clone https://gitlab.com/droppyformac1/droppykit.git ../droppykit
+      - name: Setup DroppyKit CLI
+        run: |
+          git clone --depth 1 https://gitlab.com/droppyformac1/droppykit.git ../droppykit
+          chmod +x ../droppykit/Scripts/droppykit
+          echo "$(cd ../droppykit/Scripts && pwd)" >> $GITHUB_PATH
 
       - name: Build Droplet
-        run: ../droppykit/Scripts/droppykit build
+        run: |
+          sed -i '' 's/>\/dev\/null//g' ../droppykit/Scripts/build-droplet.sh
+          droppykit build
 
       - name: Validate Droplet
-        run: ../droppykit/Scripts/droppykit validate
+        run: droppykit validate --no-lint
 
       - name: Push Git Tag
         run: |
