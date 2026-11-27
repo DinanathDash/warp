@@ -33,17 +33,24 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     public override init() {
         super.init()
 
-        engineCancellable = engine.objectWillChange.sink { [weak self] _ in
-            guard let self else { return }
-            self.objectWillChange.send()
-            self.handleEngineChange()
-        }
-
-        // Emit after @Published telemetry/phase mutations commit so the host
-        // reads fresh expandedSurfaceSize values when bento rows enter or leave.
-        layoutCancellable = Publishers.CombineLatest(engine.$currentTelemetry, engine.$phase)
+        engineCancellable = engine.$phase
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] newPhase in
+                guard let self else { return }
+                if self.lastObservedPhase.isTesting && newPhase == .completed, let telemetry = self.engine.currentTelemetry {
+                    if self.engine.showHUDOnFinish {
+                        WarpHUD.presentResult(telemetry: telemetry, unit: self.engine.speedUnit, host: self.host)
+                    }
+                }
+                self.lastObservedPhase = newPhase
+                self.objectWillChange.send()
+            }
+
+        // Emit after @Published telemetry mutations commit so the host
+        // reads fresh expandedSurfaceSize values when bento rows enter or leave.
+        layoutCancellable = engine.$currentTelemetry
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
     }

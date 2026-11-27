@@ -74,9 +74,15 @@ private final class ProcessControl: @unchecked Sendable {
 
     private let lock = NSLock()
     private let process: Process
+    private let outPipe: Pipe
+    private let errPipe: Pipe
     private var reason: StopReason?
 
-    init(process: Process) { self.process = process }
+    init(process: Process, outPipe: Pipe, errPipe: Pipe) {
+        self.process = process
+        self.outPipe = outPipe
+        self.errPipe = errPipe
+    }
 
     var stopReason: StopReason? {
         lock.lock()
@@ -99,6 +105,8 @@ private final class ProcessControl: @unchecked Sendable {
             return
         }
         if reason == nil { reason = timedOut ? .timedOut : .cancelled }
+        try? outPipe.fileHandleForWriting.close()
+        try? errPipe.fileHandleForWriting.close()
         if running {
             let pid = process.processIdentifier
             if pid > 0 {
@@ -284,6 +292,9 @@ public final class WarpEngine: ObservableObject {
         self.preferences = preferences
         loadPreferences()
         detectCLI()
+        if pathMonitor == nil {
+            startPathMonitor()
+        }
     }
 
     public func detachPreferences() {
@@ -293,6 +304,10 @@ public final class WarpEngine: ObservableObject {
     public func stop() {
         cancelTest()
         stopGaugeSimulation()
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        autoResetTask?.cancel()
+        autoResetTask = nil
     }
 
     deinit {
@@ -601,7 +616,7 @@ public final class WarpEngine: ObservableObject {
         stopGaugeSimulation()
         let startTime = Date()
 
-        gaugeSimulationTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] timer in
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
                 return
@@ -660,6 +675,8 @@ public final class WarpEngine: ObservableObject {
                 }
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        gaugeSimulationTimer = timer
     }
 
     private func stopGaugeSimulation() {
@@ -747,7 +764,7 @@ public final class WarpEngine: ObservableObject {
         let outBuffer = OutputBuffer()
         let errBuffer = OutputBuffer()
         let resumeGuard = ResumeGuard()
-        let control = ProcessControl(process: process)
+        let control = ProcessControl(process: process, outPipe: outPipe, errPipe: errPipe)
         self.currentControl = control
 
         return try await withTaskCancellationHandler {
