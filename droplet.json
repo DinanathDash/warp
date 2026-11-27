@@ -7,7 +7,7 @@
   "category": "System",
   "kit": {
     "abi": 1,
-    "minAPI": "1.27.0"
+    "minAPI": "1.26.0"
   },
   "minAppVersion": "15.3.0",
   "capabilities": [

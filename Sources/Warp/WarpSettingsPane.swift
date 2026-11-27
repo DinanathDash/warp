@@ -37,13 +37,33 @@ public struct WarpSettingsPane: View {
                     icon: "speedometer",
                     infoTip: "Choose between Megabits per second (standard) or Megabytes per second."
                 ) {
-                    Picker("", selection: $engine.speedUnit) {
-                        ForEach(SpeedUnit.allCases, id: \.self) { unit in
-                            Text(unit.displayName).tag(unit)
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("", selection: $engine.speedUnit) {
+                            ForEach(SpeedUnit.allCases, id: \.self) { unit in
+                                Text(unit.displayName).tag(unit)
+                            }
                         }
+                        .labelsHidden()
+                        .fixedSize()
                     }
-                    .labelsHidden()
-                    .frame(width: 170)
+                }
+
+                DropletControlRow(
+                    title: "Test duration",
+                    icon: "timer",
+                    infoTip: "Choose the target speedtest duration. Longer tests provide higher accuracy for high-bandwidth connections."
+                ) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("", selection: $engine.testDuration) {
+                            ForEach(TestDuration.allCases, id: \.self) { duration in
+                                Text(duration.displayName).tag(duration)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
                 }
 
                 DropletToggleRow(
@@ -111,23 +131,23 @@ public struct WarpSettingsPane: View {
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.down")
                                         .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.55))
+                                        .foregroundStyle(.green)
                                     Text(engine.speedUnit.format(mbps: item.downloadMbps))
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .monospacedDigit()
                                 }
 
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(Color(red: 0.85, green: 0.60, blue: 1.0))
+                                        .foregroundStyle(.purple)
                                     Text(engine.speedUnit.format(mbps: item.uploadMbps))
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .monospacedDigit()
                                 }
 
                                 Text(String(format: "%.0f ms", item.pingMs))
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.yellow)
                                     .monospacedDigit()
                             }

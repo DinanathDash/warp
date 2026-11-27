@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "Warp", type: .dynamic, targets: ["Warp"])
     ],
     dependencies: [
-        .package(url: "https://gitlab.com/droppyformac1/droppykit.git", from: "1.27.0")
+        .package(url: "https://gitlab.com/droppyformac1/droppykit.git", from: "1.26.0")
     ],
     targets: [
         .target(

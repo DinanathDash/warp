@@ -3,6 +3,8 @@
 //  Warp
 //
 
+import AppKit
+@_weakLinked import DroppyKit
 import SwiftUI
 
 public struct WarpGaugeView: View {
@@ -11,6 +13,10 @@ public struct WarpGaugeView: View {
     let unit: SpeedUnit
     let size: CGFloat
     let showTicks: Bool
+    let progress: Double
+    let interfaceIcon: String
+    let usesAdaptiveForegrounds: Bool
+    let onRaisedCard: Bool
 
     // 270-degree radial arc opening at the bottom
     // Start angle: 135° (bottom-left, 7:30)
@@ -19,6 +25,10 @@ public struct WarpGaugeView: View {
     private static let startAngle = Angle(degrees: 135)
     private static let endAngle = Angle(degrees: 405)
     private static let totalAngleDegrees: Double = 270.0
+    private static let arcRadiusFactor: CGFloat = 0.45
+
+    // 4 evenly spaced progress dots along the 90° bottom opening (left-to-right)
+    private static let bottomDotAngles: [Double] = [117.0, 99.0, 81.0, 63.0]
 
     // Equal 45° sectors around the 270° arc (6 equal sectors)
     private static let scalePoints: [(speed: Double, frac: Double)] = [
@@ -50,175 +60,189 @@ public struct WarpGaugeView: View {
         phase: SpeedtestPhase,
         unit: SpeedUnit = .mbps,
         size: CGFloat = 160,
-        showTicks: Bool = true
+        showTicks: Bool = false,
+        progress: Double = 0.0,
+        interfaceIcon: String = "wifi",
+        usesAdaptiveForegrounds: Bool = false,
+        onRaisedCard: Bool = false
     ) {
         self.speedMbps = speedMbps
         self.phase = phase
         self.unit = unit
         self.size = size
         self.showTicks = showTicks
+        self.progress = progress
+        self.interfaceIcon = interfaceIcon
+        self.usesAdaptiveForegrounds = usesAdaptiveForegrounds
+        self.onRaisedCard = onRaisedCard
     }
 
     private var fraction: Double {
         Self.speedToFraction(speedMbps)
     }
 
-    private var needleAngle: Angle {
-        Angle(degrees: Self.startAngle.degrees + (Self.totalAngleDegrees * fraction))
+    private var clampedProgress: Double {
+        min(1.0, max(0.0, progress))
     }
 
-    private var isUpload: Bool {
-        if case .uploading = phase { return true }
-        return false
+    private var strokeWidth: CGFloat {
+        max(6.0, size * 0.088)
     }
 
-    private var activeGradient: AngularGradient {
-        if isUpload {
-            return AngularGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.85, green: 0.65, blue: 1.0),
-                    Color(red: 0.70, green: 0.40, blue: 0.95),
-                    Color(red: 0.55, green: 0.20, blue: 0.82),
-                    Color(red: 0.35, green: 0.08, blue: 0.60)
-                ]),
-                center: .center,
-                startAngle: Self.startAngle,
-                endAngle: Self.endAngle
-            )
-        } else {
-            return AngularGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.40, green: 0.95, blue: 0.60),
-                    Color(red: 0.20, green: 0.85, blue: 0.45),
-                    Color(red: 0.10, green: 0.65, blue: 0.30),
-                    Color(red: 0.05, green: 0.45, blue: 0.20)
-                ]),
-                center: .center,
-                startAngle: Self.startAngle,
-                endAngle: Self.endAngle
-            )
+    private var primaryInk: Color {
+        usesAdaptiveForegrounds ? AdaptiveColors.primaryTextAuto : .white
+    }
+
+    private var trackColor: Color {
+        let darkWhite: CGFloat = onRaisedCard ? 0.22 : 0.14
+        if usesAdaptiveForegrounds {
+            return Color(nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor(white: isDark ? darkWhite : 0.86, alpha: 1.0)
+            })
+        }
+        return Color(white: Double(darkWhite))
+    }
+
+    private var activeArcColor: Color {
+        switch phase {
+        case .uploading:
+            return .purple
+        case .failed:
+            return .red
+        case .downloading, .completed:
+            return .green
+        case .locating, .pinging:
+            return Color(white: onRaisedCard ? 0.50 : 0.45)
+        case .idle:
+            return speedMbps > 0 ? .green : Color(white: onRaisedCard ? 0.32 : 0.26)
         }
     }
 
-    private var needleColor: Color {
-        if isUpload {
-            return Color(red: 0.85, green: 0.60, blue: 1.0)
-        } else if speedMbps > 0 {
-            return Color(red: 0.35, green: 0.95, blue: 0.55)
-        } else {
-            return Color.white.opacity(0.8)
-        }
+    private var wifiVariableValue: Double {
+        guard speedMbps > 0 else { return 0.0 }
+        return min(1.0, max(0.15, fraction))
     }
 
     public var body: some View {
         ZStack {
-            GaugeArc(startAngle: Self.startAngle, endAngle: Self.endAngle)
-                .stroke(
-                    Color.white.opacity(0.12),
-                    style: StrokeStyle(lineWidth: size * 0.075, lineCap: .round)
-                )
-
-            if fraction > 0.001 {
-                GaugeArc(
-                    startAngle: Self.startAngle,
-                    endAngle: Angle(degrees: Self.startAngle.degrees + (Self.totalAngleDegrees * fraction))
-                )
-                .stroke(
-                    activeGradient,
-                    style: StrokeStyle(lineWidth: size * 0.08, lineCap: .round)
-                )
-                .animation(.spring(response: 0.35, dampingFraction: 0.72), value: fraction)
-            }
-
+            // Layer 1 (Optional ticks behind track; default false for clean modern arc)
             if showTicks {
                 ticksView
             }
 
-            GaugeNeedle(angle: needleAngle, radius: size * 0.27)
+            // Layer 2: Opaque flat background track
+            GaugeArc(
+                startAngle: Self.startAngle,
+                endAngle: Self.endAngle,
+                radiusFactor: Self.arcRadiusFactor
+            )
+            .stroke(
+                trackColor,
+                style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
+            )
+
+            // Layer 3: Opaque flat progress arc
+            if fraction > 0.001 {
+                GaugeArc(
+                    startAngle: Self.startAngle,
+                    endAngle: Angle(degrees: Self.startAngle.degrees + (Self.totalAngleDegrees * fraction)),
+                    radiusFactor: Self.arcRadiusFactor
+                )
                 .stroke(
-                    LinearGradient(
-                        colors: [.white, needleColor],
-                        startPoint: .bottom,
-                        endPoint: .top
-                    ),
-                    style: StrokeStyle(lineWidth: max(1.5, size * 0.018), lineCap: .round)
+                    activeArcColor,
+                    style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
                 )
-                .shadow(color: needleColor.opacity(0.6), radius: 3)
-                .animation(.spring(response: 0.35, dampingFraction: 0.72), value: needleAngle)
-
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.white, Color(nsColor: .darkGray)],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: size * 0.045
-                    )
-                )
-                .frame(width: size * 0.09, height: size * 0.09)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-
-            VStack(spacing: 0) {
-                Text(unit.formatValueOnly(mbps: speedMbps))
-                    .font(.system(size: size * 0.122, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(.white)
-
-                Text(unit.rawValue)
-                    .font(.system(size: size * 0.048, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                .animation(.spring(response: 0.35, dampingFraction: 0.78), value: fraction)
             }
-            .offset(y: size * 0.285)
+
+            // Layer 4: Centered network interface icon (Wi-Fi with dynamic variableValue, or Ethernet cable/connector)
+            Group {
+                if interfaceIcon == "wifi" {
+                    Image(systemName: "wifi", variableValue: wifiVariableValue)
+                        .font(.system(size: size * 0.30, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(primaryInk)
+                        .animation(.easeInOut(duration: 0.2), value: wifiVariableValue)
+                } else {
+                    Image(systemName: interfaceIcon)
+                        .font(.system(size: size * 0.30, weight: .semibold))
+                        .foregroundStyle(primaryInk)
+                }
+            }
+
+            // Layer 5: Bottom duration progress dots (elapsed vs. remaining time)
+            bottomProgressDotsView
         }
         .frame(width: size, height: size)
     }
 
     private var ticksView: some View {
-        ZStack {
-            ForEach(0...12, id: \.self) { i in
-                let tickDeg = Self.startAngle.degrees + (Double(i) * 22.5)
-                let rad = tickDeg * .pi / 180.0
-                let isMajor = (i % 2 == 0)
-                let r1 = isMajor ? size * 0.33 : size * 0.35
-                let r2 = size * 0.38
-                let center = CGPoint(x: size / 2, y: size / 2)
+        let center = CGPoint(x: size / 2, y: size / 2)
+        let arcRadius = size * Self.arcRadiusFactor
+        let trackInnerRadius = arcRadius - (strokeWidth / 2)
 
-                Path { path in
-                    let p1 = CGPoint(x: center.x + r1 * cos(rad), y: center.y + r1 * sin(rad))
-                    let p2 = CGPoint(x: center.x + r2 * cos(rad), y: center.y + r2 * sin(rad))
-                    path.move(to: p1)
-                    path.addLine(to: p2)
-                }
-                .stroke(
-                    Color.white.opacity(isMajor ? 0.40 : 0.20),
-                    lineWidth: max(1.0, isMajor ? size * 0.013 : size * 0.008)
-                )
+        return ForEach(0...12, id: \.self) { i in
+            let tickDeg = Self.startAngle.degrees + (Double(i) * 22.5)
+            let rad = tickDeg * .pi / 180.0
+            let isMajor = (i % 2 == 0)
+            let r1 = isMajor ? (trackInnerRadius - size * 0.056) : (trackInnerRadius - size * 0.032)
+            let r2 = arcRadius
+
+            Path { path in
+                let p1 = CGPoint(x: center.x + r1 * cos(rad), y: center.y + r1 * sin(rad))
+                let p2 = CGPoint(x: center.x + r2 * cos(rad), y: center.y + r2 * sin(rad))
+                path.move(to: p1)
+                path.addLine(to: p2)
             }
-
-            labelsView
+            .stroke(
+                primaryInk.opacity(isMajor ? 0.30 : 0.16),
+                style: StrokeStyle(
+                    lineWidth: max(1.0, isMajor ? size * 0.014 : size * 0.009),
+                    lineCap: .round
+                )
+            )
         }
     }
 
-    private var labelsView: some View {
+    private var bottomProgressDotsView: some View {
         let center = CGPoint(x: size / 2, y: size / 2)
-        let milestones: [(text: String, deg: Double)] = [
-            ("0", 135.0),
-            ("50", 225.0),
-            ("100", 270.0),
-            ("250", 315.0),
-            ("1G", 405.0)
-        ]
+        let arcRadius = size * Self.arcRadiusFactor
+        let dotDiameter = max(5.0, strokeWidth * 0.84)
+        let segment = 1.0 / Double(Self.bottomDotAngles.count)
 
-        return ForEach(milestones, id: \.text) { item in
-            let rad = item.deg * .pi / 180.0
-            let rText = (item.text == "0" || item.text == "1G") ? size * 0.225 : (item.text == "100" ? size * 0.22 : size * 0.245)
-            let point = CGPoint(x: center.x + rText * cos(rad), y: center.y + rText * sin(rad))
-            Text(item.text)
-                .font(.system(size: max(8, size * 0.044), weight: .regular, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.55))
-                .position(point)
+        return ForEach(Array(Self.bottomDotAngles.enumerated()), id: \.offset) { index, deg in
+            let rad = deg * .pi / 180.0
+            let point = CGPoint(
+                x: center.x + arcRadius * cos(rad),
+                y: center.y + arcRadius * sin(rad)
+            )
+            let dotProgress = dotFillLevel(for: index, segment: segment)
+
+            ZStack {
+                Circle()
+                    .fill(trackColor)
+
+                if dotProgress > 0 {
+                    Circle()
+                        .fill(primaryInk.opacity(0.92 * dotProgress))
+                }
+            }
+            .frame(width: dotDiameter, height: dotDiameter)
+            .position(point)
+            .animation(.easeInOut(duration: 0.22), value: dotProgress)
         }
+    }
+
+    private func dotFillLevel(for index: Int, segment: Double) -> Double {
+        if phase == .completed {
+            return 1.0
+        }
+        guard phase.isTesting else {
+            return 0.0
+        }
+        let start = Double(index) * segment
+        return min(1.0, max(0.0, (clampedProgress - start) / segment))
     }
 }
 
@@ -227,6 +251,7 @@ public struct WarpGaugeView: View {
 private struct GaugeArc: Shape {
     var startAngle: Angle
     var endAngle: Angle
+    var radiusFactor: CGFloat
 
     var animatableData: Double {
         get { endAngle.degrees }
@@ -236,7 +261,7 @@ private struct GaugeArc: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2 * 0.82
+        let radius = min(rect.width, rect.height) * radiusFactor
         path.addArc(
             center: center,
             radius: radius,
@@ -244,29 +269,6 @@ private struct GaugeArc: Shape {
             endAngle: endAngle,
             clockwise: false
         )
-        return path
-    }
-}
-
-private struct GaugeNeedle: Shape {
-    var angle: Angle
-    var radius: CGFloat
-
-    var animatableData: Double {
-        get { angle.degrees }
-        set { angle = Angle(degrees: newValue) }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let rad = angle.degrees * .pi / 180.0
-        let tip = CGPoint(
-            x: center.x + radius * cos(rad),
-            y: center.y + radius * sin(rad)
-        )
-        path.move(to: center)
-        path.addLine(to: tip)
         return path
     }
 }

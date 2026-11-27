@@ -7,6 +7,7 @@ import AppKit
 import Combine
 @_weakLinked import DroppyKit
 import Foundation
+import Network
 import OSLog
 
 
@@ -73,9 +74,15 @@ private final class ProcessControl: @unchecked Sendable {
 
     private let lock = NSLock()
     private let process: Process
+    private let outPipe: Pipe
+    private let errPipe: Pipe
     private var reason: StopReason?
 
-    init(process: Process) { self.process = process }
+    init(process: Process, outPipe: Pipe, errPipe: Pipe) {
+        self.process = process
+        self.outPipe = outPipe
+        self.errPipe = errPipe
+    }
 
     var stopReason: StopReason? {
         lock.lock()
@@ -98,6 +105,8 @@ private final class ProcessControl: @unchecked Sendable {
             return
         }
         if reason == nil { reason = timedOut ? .timedOut : .cancelled }
+        try? outPipe.fileHandleForWriting.close()
+        try? errPipe.fileHandleForWriting.close()
         if running {
             let pid = process.processIdentifier
             if pid > 0 {
@@ -121,9 +130,19 @@ private final class ProcessControl: @unchecked Sendable {
 
 @MainActor
 public final class WarpEngine: ObservableObject {
+    public struct LatestStats: Equatable, Sendable {
+        public let downloadMbps: Double
+        public let uploadMbps: Double
+        public let pingMs: Double
+        public let timestamp: Date
+    }
+
     @Published public private(set) var phase: SpeedtestPhase = .idle
     @Published public private(set) var currentTelemetry: SpeedtestTelemetry?
     @Published public private(set) var currentGaugeSpeed: Double = 0.0
+    @Published public private(set) var displayedGaugeSpeed: Double = 0.0
+    @Published public private(set) var testProgress: Double = 0.0
+    @Published public private(set) var estimatedRemainingSeconds: Int = 0
     @Published public private(set) var history: [WarpHistoryItem] = []
     @Published public var speedUnit: SpeedUnit = .mbps {
         didSet { savePreferences() }
@@ -137,6 +156,14 @@ public final class WarpEngine: ObservableObject {
     @Published public var showHUDOnFinish: Bool = true {
         didSet { savePreferences() }
     }
+    @Published public var testDuration: TestDuration = .sec30 {
+        didSet {
+            savePreferences()
+            if !phase.isTesting {
+                estimatedRemainingSeconds = testDuration.rawValue
+            }
+        }
+    }
     private var isLoadingPreferences = false
 
     @Published public var retainLastResult: Bool = true {
@@ -147,6 +174,26 @@ public final class WarpEngine: ObservableObject {
         }
     }
 
+    public enum NetworkInterfaceKind: String, Sendable {
+        case wifi = "Wi-Fi"
+        case ethernet = "Ethernet"
+        case cellular = "Cellular"
+        case other = "Other"
+
+        public var systemImage: String {
+            switch self {
+            case .wifi: return "wifi"
+            case .ethernet: return "cable.connector"
+            case .cellular: return "antenna.radiowaves.left.and.right"
+            case .other: return "network"
+            }
+        }
+    }
+
+    @Published public private(set) var primaryInterfaceType: NetworkInterfaceKind = .wifi
+    private var pathMonitor: NWPathMonitor?
+    private let monitorQueue = DispatchQueue(label: "com.warp.pathMonitor", qos: .utility)
+
     public static let defaultNativeExecutable = "/usr/bin/networkQuality"
     @Published public private(set) var detectedCLIPath: String?
 
@@ -154,14 +201,89 @@ public final class WarpEngine: ObservableObject {
         detectedCLIPath == Self.defaultNativeExecutable
     }
 
+    public var activeInterfaceIcon: String {
+        if let telemetry = currentTelemetry ?? lastTelemetry, !telemetry.interfaceType.isEmpty {
+            let lower = telemetry.interfaceType.lowercased()
+            if lower.contains("ethernet") || lower.contains("wired") {
+                return "cable.connector"
+            } else if lower.contains("cellular") {
+                return "antenna.radiowaves.left.and.right"
+            } else {
+                return "wifi"
+            }
+        }
+        return primaryInterfaceType.systemImage
+    }
+
+    public var latestRecordedStats: LatestStats? {
+        if let telemetry = currentTelemetry,
+           telemetry.downloadMbps > 0 || telemetry.uploadMbps > 0 || telemetry.pingMs > 0 {
+            return LatestStats(
+                downloadMbps: telemetry.downloadMbps,
+                uploadMbps: telemetry.uploadMbps,
+                pingMs: telemetry.pingMs,
+                timestamp: telemetry.timestamp
+            )
+        }
+        if phase.isTesting || retainLastResult {
+            if let last = resolvedLastTelemetry,
+               last.downloadMbps > 0 || last.uploadMbps > 0 || last.pingMs > 0 {
+                return LatestStats(
+                    downloadMbps: last.downloadMbps,
+                    uploadMbps: last.uploadMbps,
+                    pingMs: last.pingMs,
+                    timestamp: last.timestamp
+                )
+            }
+        }
+        return nil
+    }
+
+    public var formattedLatestStatsForClipboard: String? {
+        guard let stats = latestRecordedStats else { return nil }
+        let dl = stats.downloadMbps > 0 ? speedUnit.format(mbps: stats.downloadMbps) : "--"
+        let ul = stats.uploadMbps > 0 ? speedUnit.format(mbps: stats.uploadMbps) : "--"
+        let ping = stats.pingMs > 0 ? String(format: "%.0f ms", stats.pingMs) : "--"
+        return "Download: \(dl) · Upload: \(ul) · Ping: \(ping)"
+    }
+
     private var activeTestTask: Task<Void, Never>?
     private var gaugeSimulationTimer: Timer?
     private var currentControl: ProcessControl?
     private var lastTelemetry: SpeedtestTelemetry?
     private weak var preferences: (any DropletPreferencesService)?
+    private var downloadPhaseStart: Date?
+    private var uploadPhaseStart: Date?
+    private var estimatedDownloadDuration: TimeInterval = 14.0
+    private var estimatedUploadDuration: TimeInterval = 24.0
+    private var hasMeasuredDownload = false
+    private var hasMeasuredUpload = false
+    private var lastDisplayNumberUpdate: Date = .distantPast
+    private static let displayNumberUpdateInterval: TimeInterval = 0.38
 
     public init() {
         detectCLI()
+        startPathMonitor()
+    }
+
+    private func startPathMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if path.usesInterfaceType(.wiredEthernet) {
+                    self.primaryInterfaceType = .ethernet
+                } else if path.usesInterfaceType(.cellular) {
+                    self.primaryInterfaceType = .cellular
+                } else if path.usesInterfaceType(.wifi) {
+                    self.primaryInterfaceType = .wifi
+                } else {
+                    self.primaryInterfaceType = .other
+                }
+            }
+        }
+        monitor.start(queue: monitorQueue)
+        self.pathMonitor = monitor
     }
 
     // MARK: - Lifecycle
@@ -170,6 +292,9 @@ public final class WarpEngine: ObservableObject {
         self.preferences = preferences
         loadPreferences()
         detectCLI()
+        if pathMonitor == nil {
+            startPathMonitor()
+        }
     }
 
     public func detachPreferences() {
@@ -179,9 +304,15 @@ public final class WarpEngine: ObservableObject {
     public func stop() {
         cancelTest()
         stopGaugeSimulation()
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        autoResetTask?.cancel()
+        autoResetTask = nil
     }
 
     deinit {
+        pathMonitor?.cancel()
+        pathMonitor = nil
         gaugeSimulationTimer?.invalidate()
         autoResetTask?.cancel()
         activeTestTask?.cancel()
@@ -225,6 +356,14 @@ public final class WarpEngine: ObservableObject {
         currentTelemetry = nil
         phase = .locating
         currentGaugeSpeed = 0.0
+        displayedGaugeSpeed = 0.0
+        let maxPhaseSeconds = testDuration.perPhaseSeconds
+        let phaseTimeout = Double(maxPhaseSeconds + 10)
+
+        estimatedRemainingSeconds = max(1, testDuration.rawValue)
+        downloadPhaseStart = nil
+        uploadPhaseStart = nil
+        lastDisplayNumberUpdate = .distantPast
 
         activeTestTask = Task { [weak self] in
             guard let self else { return }
@@ -234,14 +373,21 @@ public final class WarpEngine: ObservableObject {
                 self.phase = .locating
                 self.startGaugeSimulation()
 
+                self.downloadPhaseStart = Date()
                 self.phase = .downloading(currentMbps: 1.0)
                 let (dlStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-u"],
-                    timeoutSeconds: 35
+                    arguments: ["-c", "-v", "-u", "-M", "\(maxPhaseSeconds)"],
+                    timeoutSeconds: phaseTimeout
                 )
 
                 try Task.checkCancellation()
+
+                if let dlStart = self.downloadPhaseStart {
+                    let measured = max(4.0, Date().timeIntervalSince(dlStart))
+                    self.estimatedDownloadDuration = measured
+                    self.hasMeasuredDownload = true
+                }
 
                 guard let dlJsonData = dlStdout.data(using: .utf8) else {
                     throw NSError(domain: "WarpEngine", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to read download test output."])
@@ -253,17 +399,28 @@ public final class WarpEngine: ObservableObject {
 
                 self.currentTelemetry = dlTelemetry
                 self.currentGaugeSpeed = dlTelemetry.downloadMbps
+                self.displayedGaugeSpeed = dlTelemetry.downloadMbps
+                self.lastDisplayNumberUpdate = Date()
+                self.testProgress = 0.50
+                self.estimatedRemainingSeconds = max(1, Int(self.testDuration.rawValue - self.testDuration.perPhaseSeconds))
                 WarpLog.info("Download completed: \(dlTelemetry.downloadMbps) Mbps, Ping \(dlTelemetry.pingMs) ms")
 
+                self.uploadPhaseStart = Date()
                 self.phase = .uploading(currentMbps: 1.0)
 
                 let (ulStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-d"],
-                    timeoutSeconds: 35
+                    arguments: ["-c", "-v", "-d", "-M", "\(maxPhaseSeconds)"],
+                    timeoutSeconds: phaseTimeout
                 )
 
                 try Task.checkCancellation()
+
+                if let ulStart = self.uploadPhaseStart {
+                    let measured = max(4.0, Date().timeIntervalSince(ulStart))
+                    self.estimatedUploadDuration = measured
+                    self.hasMeasuredUpload = true
+                }
 
                 guard let ulJsonData = ulStdout.data(using: .utf8) else {
                     throw NSError(domain: "WarpEngine", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to read upload test output."])
@@ -302,6 +459,9 @@ public final class WarpEngine: ObservableObject {
                 self.lastTelemetry = finalTelemetry
                 self.currentTelemetry = finalTelemetry
                 self.currentGaugeSpeed = finalTelemetry.downloadMbps
+                self.displayedGaugeSpeed = finalTelemetry.downloadMbps
+                self.testProgress = 1.0
+                self.estimatedRemainingSeconds = 0
                 self.phase = .completed
 
                 WarpLog.info("Network test completed: DL \(finalTelemetry.downloadMbps) Mbps, UL \(finalTelemetry.uploadMbps) Mbps, Ping \(finalTelemetry.pingMs) ms, RPM \(finalTelemetry.responsivenessRPM)")
@@ -311,6 +471,9 @@ public final class WarpEngine: ObservableObject {
                 self.stopGaugeSimulation()
                 self.phase = .idle
                 self.currentGaugeSpeed = 0.0
+                self.displayedGaugeSpeed = 0.0
+                self.testProgress = 0.0
+                self.estimatedRemainingSeconds = 0
                 WarpLog.info("Speedtest cancelled")
             } catch {
                 self.stopGaugeSimulation()
@@ -318,6 +481,9 @@ public final class WarpEngine: ObservableObject {
                 WarpLog.error("Speedtest failed: \(errMessage)")
                 self.phase = .failed(errMessage)
                 self.currentGaugeSpeed = 0.0
+                self.displayedGaugeSpeed = 0.0
+                self.testProgress = 0.0
+                self.estimatedRemainingSeconds = 0
             }
             self.activeTestTask = nil
         }
@@ -358,6 +524,9 @@ public final class WarpEngine: ObservableObject {
             self.phase = .idle
             self.currentTelemetry = nil
             self.currentGaugeSpeed = 0.0
+            self.displayedGaugeSpeed = 0.0
+            self.testProgress = 0.0
+            self.estimatedRemainingSeconds = 0
             WarpLog.info("Shelf result auto-dismissed back to idle while out of view")
         }
     }
@@ -370,12 +539,18 @@ public final class WarpEngine: ObservableObject {
                 phase = .idle
                 currentTelemetry = nil
                 currentGaugeSpeed = 0.0
+                displayedGaugeSpeed = 0.0
+                testProgress = 0.0
+                estimatedRemainingSeconds = 0
             }
         } else {
             if currentTelemetry == nil, let last = resolvedLastTelemetry {
                 currentTelemetry = last
                 phase = .completed
                 currentGaugeSpeed = last.downloadMbps
+                displayedGaugeSpeed = last.downloadMbps
+                testProgress = 1.0
+                estimatedRemainingSeconds = 0
             }
         }
     }
@@ -411,36 +586,97 @@ public final class WarpEngine: ObservableObject {
         stopGaugeSimulation()
         phase = .idle
         currentGaugeSpeed = 0.0
+        displayedGaugeSpeed = 0.0
+        testProgress = 0.0
+        estimatedRemainingSeconds = 0
         WarpLog.info("Test stopped by user")
     }
 
     // MARK: - Gauge Simulation / Interpolation during Test
 
+    private static func asymptoticPhaseFraction(elapsed: TimeInterval, estimate: TimeInterval) -> Double {
+        let ratio = max(0.0, elapsed) / max(4.0, estimate)
+        if ratio <= 0.85 {
+            return ratio
+        }
+        return 0.85 + 0.14 * (1.0 - exp(-(ratio - 0.85) * 1.5))
+    }
+
+    private static func smoothRemainingSeconds(elapsed: TimeInterval, estimate: TimeInterval) -> TimeInterval {
+        let est = max(4.0, estimate)
+        let raw = est - elapsed
+        if raw >= 4.0 {
+            return raw
+        }
+        let overrun = 4.0 - raw
+        return 1.0 + 3.0 * exp(-overrun / 5.0)
+    }
+
     private func startGaugeSimulation() {
         stopGaugeSimulation()
         let startTime = Date()
 
-        gaugeSimulationTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] timer in
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
                 return
             }
             MainActor.assumeIsolated {
-                let elapsed = Date().timeIntervalSince(startTime)
+                let now = Date()
+                let elapsed = now.timeIntervalSince(startTime)
+                let phaseTargetSeconds = Double(self.testDuration.perPhaseSeconds)
+                let totalTargetSeconds = Double(self.testDuration.rawValue)
+                let uploadBudgetSeconds = max(1.0, totalTargetSeconds - phaseTargetSeconds)
+
                 switch self.phase {
                 case .locating, .pinging:
                     self.currentGaugeSpeed = max(0, sin(elapsed * 4) * 5.0)
+                    self.testProgress = min(0.06, max(self.testProgress, 0.02 + min(1.0, elapsed / 2.0) * 0.04))
+                    let rem = max(1, Int(ceil(max(1.0, totalTargetSeconds - elapsed))))
+                    if rem != self.estimatedRemainingSeconds {
+                        self.estimatedRemainingSeconds = rem
+                    }
+                    if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
+                        self.displayedGaugeSpeed = self.currentGaugeSpeed
+                        self.lastDisplayNumberUpdate = now
+                    }
                 case .downloading:
                     let baseTarget = 65.0 + sin(elapsed * 3.5) * 18.0 + cos(elapsed * 7.0) * 8.0
                     self.currentGaugeSpeed = max(1.0, baseTarget)
+                    let dlElapsed = now.timeIntervalSince(self.downloadPhaseStart ?? startTime)
+                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: dlElapsed, estimate: phaseTargetSeconds)
+                    self.testProgress = min(0.49, max(self.testProgress, 0.06 + phaseFrac * 0.43))
+                    let dlRemaining = Self.smoothRemainingSeconds(elapsed: dlElapsed, estimate: phaseTargetSeconds)
+                    let rem = max(1, Int(ceil(dlRemaining + uploadBudgetSeconds)))
+                    if rem != self.estimatedRemainingSeconds {
+                        self.estimatedRemainingSeconds = rem
+                    }
+                    if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
+                        self.displayedGaugeSpeed = self.currentGaugeSpeed
+                        self.lastDisplayNumberUpdate = now
+                    }
                 case .uploading:
                     let baseTarget = 35.0 + sin(elapsed * 4.0) * 10.0 + cos(elapsed * 8.0) * 5.0
                     self.currentGaugeSpeed = max(1.0, baseTarget)
+                    let ulElapsed = now.timeIntervalSince(self.uploadPhaseStart ?? startTime)
+                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
+                    self.testProgress = min(0.98, max(self.testProgress, 0.50 + phaseFrac * 0.48))
+                    let ulRemaining = Self.smoothRemainingSeconds(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
+                    let rem = max(1, Int(ceil(ulRemaining)))
+                    if rem != self.estimatedRemainingSeconds {
+                        self.estimatedRemainingSeconds = rem
+                    }
+                    if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
+                        self.displayedGaugeSpeed = self.currentGaugeSpeed
+                        self.lastDisplayNumberUpdate = now
+                    }
                 default:
                     break
                 }
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        gaugeSimulationTimer = timer
     }
 
     private func stopGaugeSimulation() {
@@ -528,7 +764,7 @@ public final class WarpEngine: ObservableObject {
         let outBuffer = OutputBuffer()
         let errBuffer = OutputBuffer()
         let resumeGuard = ResumeGuard()
-        let control = ProcessControl(process: process)
+        let control = ProcessControl(process: process, outPipe: outPipe, errPipe: errPipe)
         self.currentControl = control
 
         return try await withTaskCancellationHandler {
@@ -602,6 +838,9 @@ public final class WarpEngine: ObservableObject {
         lastTelemetry = nil
         currentTelemetry = nil
         currentGaugeSpeed = 0.0
+        displayedGaugeSpeed = 0.0
+        testProgress = 0.0
+        estimatedRemainingSeconds = 0
         phase = .idle
         autoResetTask?.cancel()
         autoResetTask = nil
@@ -628,6 +867,10 @@ public final class WarpEngine: ObservableObject {
         if let hud = preferences.value(forKey: "warp.showHUDOnFinish", as: Bool.self) {
             showHUDOnFinish = hud
         }
+        if let durVal = preferences.value(forKey: "warp.testDuration", as: Int.self),
+           let dur = TestDuration(rawValue: durVal) {
+            testDuration = dur
+        }
         if let retain = preferences.value(forKey: "warp.retainLastResult", as: Bool.self) {
             retainLastResult = retain
         }
@@ -637,11 +880,24 @@ public final class WarpEngine: ObservableObject {
         if let savedTelemetry = preferences.value(forKey: "warp.lastTelemetry", as: SpeedtestTelemetry.self) {
             lastTelemetry = savedTelemetry
         }
+        if let savedDlDuration = preferences.value(forKey: "warp.estimatedDownloadDuration", as: Double.self),
+           savedDlDuration >= 4.0 && savedDlDuration <= 130.0 {
+            estimatedDownloadDuration = savedDlDuration
+            hasMeasuredDownload = true
+        }
+        if let savedUlDuration = preferences.value(forKey: "warp.estimatedUploadDuration", as: Double.self),
+           savedUlDuration >= 4.0 && savedUlDuration <= 130.0 {
+            estimatedUploadDuration = savedUlDuration
+            hasMeasuredUpload = true
+        }
         if retainLastResult && currentTelemetry == nil && phase == .idle {
             if let last = resolvedLastTelemetry {
                 currentTelemetry = last
                 phase = .completed
                 currentGaugeSpeed = last.downloadMbps
+                displayedGaugeSpeed = last.downloadMbps
+                testProgress = 1.0
+                estimatedRemainingSeconds = 0
             }
         }
     }
@@ -651,8 +907,15 @@ public final class WarpEngine: ObservableObject {
         preferences.setValue(speedUnit.rawValue, forKey: "warp.speedUnit")
         preferences.setValue(customCLIPath.isEmpty ? nil : customCLIPath, forKey: "warp.customCLIPath")
         preferences.setValue(showHUDOnFinish, forKey: "warp.showHUDOnFinish")
+        preferences.setValue(testDuration.rawValue, forKey: "warp.testDuration")
         preferences.setValue(retainLastResult, forKey: "warp.retainLastResult")
         preferences.setValue(history.isEmpty ? nil : history, forKey: "warp.history")
         preferences.setValue(retainLastResult ? (currentTelemetry ?? lastTelemetry) : nil, forKey: "warp.lastTelemetry")
+        if hasMeasuredDownload {
+            preferences.setValue(estimatedDownloadDuration, forKey: "warp.estimatedDownloadDuration")
+        }
+        if hasMeasuredUpload {
+            preferences.setValue(estimatedUploadDuration, forKey: "warp.estimatedUploadDuration")
+        }
     }
 }

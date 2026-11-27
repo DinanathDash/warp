@@ -51,7 +51,7 @@ Warp provides instant, zero-dependency network speed testing directly from your 
 ## Requirements
 
 - macOS 14.0 or newer
-- [Droppy](https://getdroppy.app) with DroppyKit 1.27.0+
+- [Droppy](https://getdroppy.app) with DroppyKit 1.26.0+
 
 ## License & Acknowledgements
 

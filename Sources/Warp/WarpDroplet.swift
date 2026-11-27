@@ -26,17 +26,33 @@ public final class WarpDroplet: NSObject, ObservableObject, Droplet {
     public private(set) var host: DropletHost?
 
     private var engineCancellable: AnyCancellable?
+    private var layoutCancellable: AnyCancellable?
     private var expandedSurfacePresentation: ExpandedSurfacePresentation?
     private var lastObservedPhase: SpeedtestPhase = .idle
 
     public override init() {
         super.init()
 
-        engineCancellable = engine.objectWillChange.sink { [weak self] _ in
-            guard let self else { return }
-            self.objectWillChange.send()
-            self.handleEngineChange()
-        }
+        engineCancellable = engine.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newPhase in
+                guard let self else { return }
+                if self.lastObservedPhase.isTesting && newPhase == .completed, let telemetry = self.engine.currentTelemetry {
+                    if self.engine.showHUDOnFinish {
+                        WarpHUD.presentResult(telemetry: telemetry, unit: self.engine.speedUnit, host: self.host)
+                    }
+                }
+                self.lastObservedPhase = newPhase
+                self.objectWillChange.send()
+            }
+
+        // Emit after @Published telemetry mutations commit so the host
+        // reads fresh expandedSurfaceSize values when bento rows enter or leave.
+        layoutCancellable = engine.$currentTelemetry
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 
     public func activate(host: DropletHost) throws {
@@ -103,12 +119,12 @@ extension WarpDroplet: ShelfWidgetProviding {
             ShelfWidgetDescriptor(
                 id: Self.widgetID,
                 title: "Warp",
-                systemImage: "gauge.with.needle.fill",
+                systemImage: "speedometer",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: 380,
-                    preferredPairedWidth: 190,
+                    preferredSoloWidth: WarpShelfWidgetView.preferredSoloWidth,
+                    preferredPairedWidth: WarpShelfWidgetView.preferredPairedWidth,
                     contentHeight: .fixed(WarpShelfWidgetView.contentHeight),
-                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 70)
+                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 56)
                 ),
                 searchKeywords: ["speedtest", "speed", "bandwidth", "network", "ping", "gauge"]
             )
@@ -147,7 +163,7 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
             ExpandedSurfaceDescriptor(
                 id: Self.expandedSurfaceID,
                 title: "Speedtest",
-                systemImage: "gauge.with.needle.fill",
+                systemImage: "speedometer",
                 suppresses: [.shelfWidgets, .autoCollapse]
             )
         ]
@@ -172,6 +188,16 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         _ id: ExpandedSurfaceID,
         fitting proposal: ExpandedSurfaceSizeProposal
     ) -> CGSize? {
-        CGSize(width: 560, height: 340)
+        CGSize(width: 520, height: 268)
+    }
+
+    public func expandedSurfaceDidDismiss(
+        _ id: ExpandedSurfaceID,
+        presentation: ExpandedSurfacePresentation,
+        reason: ExpandedSurfaceDismissalReason
+    ) {
+        if expandedSurfacePresentation?.id == presentation.id {
+            expandedSurfacePresentation = nil
+        }
     }
 }

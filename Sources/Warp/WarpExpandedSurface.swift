@@ -28,7 +28,7 @@ public struct WarpExpandedSurfaceView: View {
         self.onOpenSettings = onOpenSettings
     }
 
-    private let bentoCardHeight: CGFloat = 276
+    private let bentoCardHeight: CGFloat = 210
 
     private var isTesting: Bool {
         engine.phase.isTesting
@@ -39,7 +39,7 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             headerBar
 
             Group {
@@ -64,8 +64,8 @@ public struct WarpExpandedSurfaceView: View {
             .offset(y: isCollapsing ? -18 : (isMorphedIn ? 0 : -10))
             .opacity(isCollapsing ? 0.0 : (isMorphedIn ? 1.0 : 0.0))
         }
-        .padding(14)
-        .frame(width: 560, height: 340)
+        .padding(12)
+        .frame(width: 520, height: 268)
         .animation(.spring(response: 0.52, dampingFraction: 0.82), value: hasResultsOrTesting)
         .onAppear {
             engine.expandedVisibilityDidChange(isVisible: true)
@@ -80,41 +80,30 @@ public struct WarpExpandedSurfaceView: View {
 
     private var headerBar: some View {
         HStack {
-            HStack(spacing: 8) {
-                Image(systemName: "gauge.with.needle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color(white: 0.82))
-                Text("Warp Network Speedtest")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+            Button {
+                onOpenSettings()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .semibold))
             }
+            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 11))
+            .help("Settings")
 
             Spacer()
 
-            HStack(spacing: 8) {
-                Button {
-                    onOpenSettings()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .semibold))
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    isCollapsing = true
                 }
-                .buttonStyle(DroppyCircleButtonStyle(size: 24))
-                .help("Settings")
-
-                Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                        isCollapsing = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                        onCollapse()
-                    }
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 10, weight: .semibold))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                    onCollapse()
                 }
-                .buttonStyle(DroppyCircleButtonStyle(size: 24))
-                .help("Collapse to HUD")
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 10, weight: .semibold))
             }
+            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 10))
+            .help("Collapse to HUD")
         }
     }
 
@@ -129,15 +118,17 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private var freshCenterView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 10) {
             Spacer(minLength: 0)
 
             WarpGaugeView(
                 speedMbps: 0.0,
                 phase: .idle,
                 unit: engine.speedUnit,
-                size: 190,
-                showTicks: true
+                size: 148,
+                showTicks: false,
+                interfaceIcon: engine.activeInterfaceIcon,
+                onRaisedCard: true
             )
 
             Spacer(minLength: 0)
@@ -149,37 +140,34 @@ public struct WarpExpandedSurfaceView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "play.fill")
+                        .font(.system(size: 11, weight: .semibold))
                     Text("Start Speedtest")
+                        .font(.system(size: 12.5, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(WarpGlassButtonStyle(cornerRadius: 14, tintColor: .cyan))
-            .frame(width: 210)
+            .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
+            .frame(width: 180)
 
             Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(width: 290, height: bentoCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
+        .padding(10)
+        .frame(width: 260, height: bentoCardHeight)
     }
 
     private var leftGaugeBentoCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             Spacer(minLength: 0)
 
             WarpGaugeView(
                 speedMbps: currentDisplaySpeed,
                 phase: engine.phase.isTesting ? engine.phase : (engine.currentTelemetry != nil ? .completed : .idle),
                 unit: engine.speedUnit,
-                size: 160,
-                showTicks: true
+                size: 144,
+                showTicks: false,
+                progress: engine.testProgress,
+                interfaceIcon: engine.activeInterfaceIcon,
+                onRaisedCard: true
             )
 
             Spacer(minLength: 0)
@@ -188,21 +176,28 @@ public struct WarpExpandedSurfaceView: View {
                 Button {
                     engine.cancelTest()
                 } label: {
-                    Text("Cancel Test")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Cancel Test")
+                            .font(.system(size: 12.5, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(WarpGlassButtonStyle(cornerRadius: 14))
+                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
             } else {
                 Button {
                     engine.startTest()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill")
+                            .font(.system(size: 10, weight: .semibold))
                         Text(engine.currentTelemetry == nil ? "Start Speedtest" : "Run Again")
+                            .font(.system(size: 12.5, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(WarpGlassButtonStyle(cornerRadius: 14, tintColor: .cyan))
+                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
 
                 if let shareURL = engine.currentTelemetry?.shareURL {
                     Button {
@@ -210,25 +205,19 @@ public struct WarpExpandedSurfaceView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 10, weight: .semibold))
                             Text("Share Result")
+                                .font(.system(size: 11.5, weight: .semibold))
                         }
                     }
-                    .buttonStyle(WarpGlassButtonStyle(cornerRadius: 14))
+                    .buttonStyle(DroppyWashPillButtonStyle(height: 26, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
                 }
             }
 
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(width: 220, height: bentoCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
+        .padding(8)
+        .frame(width: 200, height: bentoCardHeight)
     }
 
     private var rightBentoColumn: some View {
@@ -237,14 +226,15 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private func activeBentoGrid(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 4) {
             HStack(spacing: 8) {
                 bentoTile(
                     title: "Download",
                     value: displayDownloadSpeed,
                     subtitle: isDownloadPhase ? "Testing…" : (telemetry.map { formatBytes($0.bytesReceived) } ?? "--"),
                     icon: "arrow.down.circle.fill",
-                    color: Color(red: 0.35, green: 0.95, blue: 0.55)
+                    color: .green,
+                    valueColor: displayDownloadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .green
                 )
 
                 bentoTile(
@@ -252,7 +242,8 @@ public struct WarpExpandedSurfaceView: View {
                     value: displayUploadSpeed,
                     subtitle: (isDownloadPhase || isUploadPhase) ? (isUploadPhase ? "Testing…" : "--") : (telemetry.map { formatBytes($0.bytesSent) } ?? "--"),
                     icon: "arrow.up.circle.fill",
-                    color: Color(red: 0.85, green: 0.60, blue: 1.0)
+                    color: .purple,
+                    valueColor: displayUploadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .purple
                 )
             }
 
@@ -267,9 +258,9 @@ public struct WarpExpandedSurfaceView: View {
 
                 bentoTile(
                     title: "Connection",
-                    value: telemetry?.interfaceType ?? "Active Link",
+                    value: telemetry?.interfaceType ?? engine.primaryInterfaceType.rawValue,
                     subtitle: telemetry?.protocolName.isEmpty == false ? "\(telemetry!.protocolName) · \(telemetry!.clientIP)" : (telemetry?.clientIP ?? "macOS Native"),
-                    icon: (telemetry?.interfaceType == "Ethernet") ? "cable.connector" : "wifi",
+                    icon: engine.activeInterfaceIcon,
                     color: .secondary
                 )
             }
@@ -304,9 +295,10 @@ public struct WarpExpandedSurfaceView: View {
         value: String,
         subtitle: String,
         icon: String,
-        color: Color
+        color: Color,
+        valueColor: Color = AdaptiveColors.notchSurfacePrimaryText
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10))
@@ -316,24 +308,24 @@ public struct WarpExpandedSurfaceView: View {
                     .foregroundStyle(.secondary)
             }
             Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.system(size: 14, weight: .semibold))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .foregroundStyle(.white)
+                .animation(.smooth(duration: 0.3), value: value)
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
             Text(subtitle)
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(9)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1))
     }
 
     private func bentoServerTile(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "server.rack")
                     .font(.system(size: 10))
@@ -350,10 +342,9 @@ public struct WarpExpandedSurfaceView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(9)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1))
     }
 
     private func serverTitleText(telemetry: SpeedtestTelemetry?) -> String {
@@ -379,7 +370,7 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private func bentoDiagnosticsTile(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "waveform.path.ecg")
                     .font(.system(size: 10))
@@ -398,6 +389,7 @@ public struct WarpExpandedSurfaceView: View {
                         .foregroundStyle(.white)
                         .monospacedDigit()
                         .contentTransition(.numericText())
+                        .animation(.smooth(duration: 0.3), value: telemetry.workingLatencyMs)
                 }
             } else if let telemetry, telemetry.tcpHandshakeMs > 0 {
                 HStack(spacing: 4) {
@@ -415,10 +407,9 @@ public struct WarpExpandedSurfaceView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(9)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1))
     }
 
     private func rpmRating(_ rpm: Double) -> String {
@@ -464,66 +455,5 @@ public struct WarpExpandedSurfaceView: View {
             return String(format: "%.2f GB", mb / 1024.0)
         }
         return String(format: "%.1f MB", mb)
-    }
-}
-
-// MARK: - DroppyKit Glass Button Style with Congruent Corner Radius
-
-struct WarpGlassButtonStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 14
-    var tintColor: Color? = nil
-    var destructive: Bool = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        WarpGlassButtonContent(
-            configuration: configuration,
-            cornerRadius: cornerRadius,
-            tintColor: tintColor,
-            destructive: destructive
-        )
-    }
-}
-
-private struct WarpGlassButtonContent: View {
-    let configuration: ButtonStyleConfiguration
-    let cornerRadius: CGFloat
-    let tintColor: Color?
-    let destructive: Bool
-
-    @State private var isHovering = false
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var fill: DroppyGlassControl.Fill {
-        if destructive {
-            return .tinted(.red)
-        } else if let tintColor {
-            return DroppyGlassControl.fill(for: tintColor)
-        } else {
-            return .veil
-        }
-    }
-
-    private var shape: AnyShape {
-        AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    }
-
-    var body: some View {
-        let resolvedFill = fill
-        configuration.label
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .minimumScaleFactor(0.9)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(DroppyGlassControl.ink(for: resolvedFill, isEnabled: isEnabled))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .droppyGlassControlChrome(
-                shape: shape,
-                fill: resolvedFill,
-                isHovering: isHovering,
-                isPressed: configuration.isPressed
-            )
-            .onHover { isHovering = $0 }
     }
 }
