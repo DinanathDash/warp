@@ -225,7 +225,8 @@ public final class WarpEngine: ObservableObject {
                 timestamp: telemetry.timestamp
             )
         }
-        if phase.isTesting || retainLastResult {
+        guard !phase.isTesting else { return nil }
+        if retainLastResult {
             if let last = resolvedLastTelemetry,
                last.downloadMbps > 0 || last.uploadMbps > 0 || last.pingMs > 0 {
                 return LatestStats(
@@ -589,6 +590,7 @@ public final class WarpEngine: ObservableObject {
         displayedGaugeSpeed = 0.0
         testProgress = 0.0
         estimatedRemainingSeconds = 0
+        currentTelemetry = nil
         WarpLog.info("Test stopped by user")
     }
 
@@ -630,20 +632,29 @@ public final class WarpEngine: ObservableObject {
 
                 switch self.phase {
                 case .locating, .pinging:
-                    self.currentGaugeSpeed = max(0, sin(elapsed * 4) * 5.0)
-                    self.testProgress = min(0.06, max(self.testProgress, 0.02 + min(1.0, elapsed / 2.0) * 0.04))
+                    self.currentGaugeSpeed = 0.0
+                    self.displayedGaugeSpeed = 0.0
+                    self.testProgress = min(0.06, max(self.testProgress, min(1.0, elapsed / 2.0) * 0.06))
                     let rem = max(1, Int(ceil(max(1.0, totalTargetSeconds - elapsed))))
                     if rem != self.estimatedRemainingSeconds {
                         self.estimatedRemainingSeconds = rem
                     }
-                    if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
-                        self.displayedGaugeSpeed = self.currentGaugeSpeed
-                        self.lastDisplayNumberUpdate = now
-                    }
                 case .downloading:
-                    let baseTarget = 65.0 + sin(elapsed * 3.5) * 18.0 + cos(elapsed * 7.0) * 8.0
-                    self.currentGaugeSpeed = max(1.0, baseTarget)
                     let dlElapsed = now.timeIntervalSince(self.downloadPhaseStart ?? startTime)
+                    let transitionDelay: TimeInterval = 0.52
+                    if dlElapsed < transitionDelay {
+                        self.currentGaugeSpeed = 0.0
+                        self.displayedGaugeSpeed = 0.0
+                    } else {
+                        let activeElapsed = dlElapsed - transitionDelay
+                        let ramp = min(1.0, activeElapsed / 0.8)
+                        let baseTarget = (65.0 + sin(activeElapsed * 3.5) * 18.0 + cos(activeElapsed * 7.0) * 8.0) * ramp
+                        self.currentGaugeSpeed = max(0.0, baseTarget)
+                        if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
+                            self.displayedGaugeSpeed = self.currentGaugeSpeed
+                            self.lastDisplayNumberUpdate = now
+                        }
+                    }
                     let phaseFrac = Self.asymptoticPhaseFraction(elapsed: dlElapsed, estimate: phaseTargetSeconds)
                     self.testProgress = min(0.49, max(self.testProgress, 0.06 + phaseFrac * 0.43))
                     let dlRemaining = Self.smoothRemainingSeconds(elapsed: dlElapsed, estimate: phaseTargetSeconds)
@@ -651,14 +662,11 @@ public final class WarpEngine: ObservableObject {
                     if rem != self.estimatedRemainingSeconds {
                         self.estimatedRemainingSeconds = rem
                     }
-                    if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
-                        self.displayedGaugeSpeed = self.currentGaugeSpeed
-                        self.lastDisplayNumberUpdate = now
-                    }
                 case .uploading:
-                    let baseTarget = 35.0 + sin(elapsed * 4.0) * 10.0 + cos(elapsed * 8.0) * 5.0
-                    self.currentGaugeSpeed = max(1.0, baseTarget)
                     let ulElapsed = now.timeIntervalSince(self.uploadPhaseStart ?? startTime)
+                    let ramp = min(1.0, ulElapsed / 0.7)
+                    let baseTarget = (35.0 + sin(ulElapsed * 4.0) * 10.0 + cos(ulElapsed * 8.0) * 5.0) * ramp
+                    self.currentGaugeSpeed = max(0.0, baseTarget)
                     let phaseFrac = Self.asymptoticPhaseFraction(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
                     self.testProgress = min(0.98, max(self.testProgress, 0.50 + phaseFrac * 0.48))
                     let ulRemaining = Self.smoothRemainingSeconds(elapsed: ulElapsed, estimate: uploadBudgetSeconds)

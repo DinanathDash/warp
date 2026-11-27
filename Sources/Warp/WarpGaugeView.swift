@@ -143,18 +143,17 @@ public struct WarpGaugeView: View {
             )
 
             // Layer 3: Opaque flat progress arc
-            if fraction > 0.001 {
-                GaugeArc(
-                    startAngle: Self.startAngle,
-                    endAngle: Angle(degrees: Self.startAngle.degrees + (Self.totalAngleDegrees * fraction)),
-                    radiusFactor: Self.arcRadiusFactor
-                )
-                .stroke(
-                    activeArcColor,
-                    style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
-                )
-                .animation(.spring(response: 0.35, dampingFraction: 0.78), value: fraction)
-            }
+            GaugeArc(
+                startAngle: Self.startAngle,
+                endAngle: Angle(degrees: Self.startAngle.degrees + (Self.totalAngleDegrees * max(0.0, fraction))),
+                radiusFactor: Self.arcRadiusFactor
+            )
+            .stroke(
+                activeArcColor,
+                style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
+            )
+            .opacity(fraction > 0.001 ? 1.0 : 0.0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.78), value: fraction)
 
             // Layer 4: Centered network interface icon (Wi-Fi with dynamic variableValue, or Ethernet cable/connector)
             Group {

@@ -78,16 +78,14 @@ public struct WarpShelfWidgetView: View {
 
     private var dialSize: CGFloat {
         if context.isCompact {
-            return 82
+            return 58
         }
         return 98
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            if !context.isCompact {
-                headerRow
-            }
+            headerRow
 
             if context.isCompact {
                 compactLayout
@@ -123,7 +121,7 @@ public struct WarpShelfWidgetView: View {
                 Spacer(minLength: 0)
                 expandButton
             }
-            .frame(height: 28)
+            .frame(height: context.isCompact ? 26 : 28)
         }
     }
 
@@ -140,7 +138,7 @@ public struct WarpShelfWidgetView: View {
                 usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
             )
         )
-        .padding(.top, 4)
+        .padding(.top, context.isCompact ? 2 : 4)
         .help("Warp settings")
         .accessibilityLabel("Warp settings")
     }
@@ -158,7 +156,7 @@ public struct WarpShelfWidgetView: View {
                 usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
             )
         )
-        .padding(.top, 4)
+        .padding(.top, context.isCompact ? 2 : 4)
         .help("Open expanded view")
         .accessibilityLabel("Open expanded view")
     }
@@ -185,24 +183,16 @@ public struct WarpShelfWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    // MARK: - Compact Layout
+    // MARK: - Compact Layout (Paired Mode)
 
     private var compactLayout: some View {
-        HStack(alignment: .center, spacing: DroppySpacing.sm) {
+        VStack(spacing: 5) {
             gaugeButton(size: dialSize)
+                .offset(y: -4)
 
-            VStack(alignment: .center, spacing: 6) {
-                HStack {
-                    Spacer(minLength: 0)
-                    expandButton
-                }
-                .padding(.top, -2)
+            compactStatusRow
 
-                telemetryColumns(isSpacious: false)
-                pingStatusRow(isSpacious: false)
-                actionButtonsRow(isSpacious: false)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
+            actionButtonsRow(isSpacious: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
@@ -317,29 +307,132 @@ public struct WarpShelfWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    // MARK: - Compact Status Row (Paired Mode)
+
+    @ViewBuilder
+    private var compactStatusRow: some View {
+        if isTesting {
+            HStack(spacing: 4) {
+                if isDownloadPhase {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.green)
+                } else if isUploadPhase {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.purple)
+                }
+
+                Text(liveTestingStatusText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(primaryInk)
+                    .lineLimit(1)
+
+                if isDownloadPhase || isUploadPhase {
+                    Text(isDownloadPhase ? downloadValueText : uploadValueText)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(isDownloadPhase ? .green : .purple)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: isDownloadPhase ? downloadNumericValue : uploadNumericValue))
+                        .animation(.smooth(duration: 0.3), value: isDownloadPhase ? downloadValueText : uploadValueText)
+                        .lineLimit(1)
+                }
+
+                if engine.estimatedRemainingSeconds > 0 {
+                    Text("·")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(secondaryInk)
+
+                    Text(remainingTimeText)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(secondaryInk)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(.smooth(duration: 0.3), value: engine.estimatedRemainingSeconds)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else if engine.latestRecordedStats != nil {
+            HStack(spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.green)
+                    Text(downloadValueText)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(hasDownloadValue ? .green : primaryInk)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: downloadNumericValue))
+                        .animation(.smooth(duration: 0.3), value: downloadValueText)
+                        .lineLimit(1)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.purple)
+                    Text(uploadValueText)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(hasUploadValue ? .purple : primaryInk)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: uploadNumericValue))
+                        .animation(.smooth(duration: 0.3), value: uploadValueText)
+                        .lineLimit(1)
+                }
+
+                Text("·")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+
+                Text(pingText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: pingNumericValue))
+                    .animation(.smooth(duration: 0.3), value: pingText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: "speedometer")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                Text("Ready to test")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryInk)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
     // MARK: - Action Buttons Row (Copy + reduced-width Cyan/Blue button)
 
     private func actionButtonsRow(isSpacious: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                copyLatestStats()
-            } label: {
-                Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: isSpacious ? 13 : 11, weight: .semibold))
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(
-                DroppyWashCircleButtonStyle(
-                    diameter: isSpacious ? 28 : 24,
-                    tone: didCopy ? .accent(.cyan) : .neutral,
-                    glyphSize: isSpacious ? 13 : 11,
-                    usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+        HStack(spacing: isSpacious ? 8 : 6) {
+            if isSpacious || engine.latestRecordedStats != nil {
+                Button {
+                    copyLatestStats()
+                } label: {
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: isSpacious ? 13 : 11, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(
+                    DroppyWashCircleButtonStyle(
+                        diameter: isSpacious ? 28 : 24,
+                        tone: didCopy ? .accent(.cyan) : .neutral,
+                        glyphSize: isSpacious ? 13 : 11,
+                        usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
+                    )
                 )
-            )
-            .animation(.smooth(duration: 0.25), value: didCopy)
-            .disabled(engine.latestRecordedStats == nil)
-            .help(didCopy ? "Copied" : "Copy test results")
-            .accessibilityLabel("Copy test results")
+                .animation(.smooth(duration: 0.25), value: didCopy)
+                .disabled(engine.latestRecordedStats == nil)
+                .help(didCopy ? "Copied" : "Copy test results")
+                .accessibilityLabel("Copy test results")
+            }
 
             Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -358,7 +451,7 @@ public struct WarpShelfWidgetView: View {
                         .font(.system(size: isSpacious ? 12 : 11, weight: .semibold))
                         .lineLimit(1)
                 }
-                .frame(width: isSpacious ? (engine.latestRecordedStats == nil ? 64 : 88) : (engine.latestRecordedStats == nil ? 56 : 78))
+                .frame(width: isSpacious ? (engine.latestRecordedStats == nil ? 64 : 88) : (engine.latestRecordedStats == nil ? 56 : 74))
             }
             .buttonStyle(
                 DroppyWashPillButtonStyle(
@@ -414,6 +507,9 @@ public struct WarpShelfWidgetView: View {
         if isDownloadPhase {
             return engine.displayedGaugeSpeed > 0
         }
+        if isTesting {
+            return (engine.currentTelemetry?.downloadMbps ?? 0) > 0
+        }
         return (engine.latestRecordedStats?.downloadMbps ?? 0) > 0
     }
 
@@ -421,8 +517,8 @@ public struct WarpShelfWidgetView: View {
         if isUploadPhase {
             return engine.displayedGaugeSpeed > 0
         }
-        if isDownloadPhase {
-            return (engine.latestRecordedStats?.uploadMbps ?? 0) > 0
+        if isTesting {
+            return false
         }
         return (engine.latestRecordedStats?.uploadMbps ?? 0) > 0
     }
@@ -431,12 +527,18 @@ public struct WarpShelfWidgetView: View {
         if isDownloadPhase {
             return engine.displayedGaugeSpeed
         }
+        if isTesting {
+            return engine.currentTelemetry?.downloadMbps ?? 0.0
+        }
         return engine.latestRecordedStats?.downloadMbps ?? 0.0
     }
 
     private var uploadNumericValue: Double {
         if isUploadPhase {
             return engine.displayedGaugeSpeed
+        }
+        if isTesting {
+            return 0.0
         }
         return engine.latestRecordedStats?.uploadMbps ?? 0.0
     }
@@ -449,6 +551,12 @@ public struct WarpShelfWidgetView: View {
         if isDownloadPhase {
             return engine.speedUnit.formatValueOnly(mbps: engine.displayedGaugeSpeed)
         }
+        if isTesting {
+            if let dl = engine.currentTelemetry?.downloadMbps, dl > 0 {
+                return engine.speedUnit.formatValueOnly(mbps: dl)
+            }
+            return "--"
+        }
         if let stats = engine.latestRecordedStats, stats.downloadMbps > 0 {
             return engine.speedUnit.formatValueOnly(mbps: stats.downloadMbps)
         }
@@ -458,6 +566,9 @@ public struct WarpShelfWidgetView: View {
     private var uploadValueText: String {
         if isUploadPhase {
             return engine.speedUnit.formatValueOnly(mbps: engine.displayedGaugeSpeed)
+        }
+        if isTesting {
+            return "--"
         }
         if let stats = engine.latestRecordedStats, stats.uploadMbps > 0 {
             return engine.speedUnit.formatValueOnly(mbps: stats.uploadMbps)

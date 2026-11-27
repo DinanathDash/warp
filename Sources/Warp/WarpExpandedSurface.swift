@@ -42,22 +42,21 @@ public struct WarpExpandedSurfaceView: View {
         VStack(spacing: 8) {
             headerBar
 
-            Group {
+            HStack(alignment: .top, spacing: hasResultsOrTesting ? 14 : 0) {
+                if !hasResultsOrTesting {
+                    Spacer(minLength: 0)
+                }
+
+                gaugeBentoCard
+
                 if hasResultsOrTesting {
-                    HStack(alignment: .top, spacing: 14) {
-                        leftGaugeBentoCard
-                        rightBentoColumn
-                    }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .opacity
-                    ))
-                } else {
-                    freshCenterView
+                    rightBentoColumn
                         .transition(.asymmetric(
-                            insertion: .scale(scale: 0.95).combined(with: .opacity),
-                            removal: .scale(scale: 0.95).combined(with: .opacity)
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
                         ))
+                } else {
+                    Spacer(minLength: 0)
                 }
             }
             .scaleEffect(isCollapsing ? 0.80 : (isMorphedIn ? 1.0 : 0.88), anchor: .top)
@@ -117,45 +116,7 @@ public struct WarpExpandedSurfaceView: View {
         }
     }
 
-    private var freshCenterView: some View {
-        VStack(spacing: 10) {
-            Spacer(minLength: 0)
-
-            WarpGaugeView(
-                speedMbps: 0.0,
-                phase: .idle,
-                unit: engine.speedUnit,
-                size: 148,
-                showTicks: false,
-                interfaceIcon: engine.activeInterfaceIcon,
-                onRaisedCard: true
-            )
-
-            Spacer(minLength: 0)
-
-            Button {
-                withAnimation(.spring(response: 0.52, dampingFraction: 0.82)) {
-                    engine.startTest()
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Start Speedtest")
-                        .font(.system(size: 12.5, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
-            .frame(width: 180)
-
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .frame(width: 260, height: bentoCardHeight)
-    }
-
-    private var leftGaugeBentoCard: some View {
+    private var gaugeBentoCard: some View {
         VStack(spacing: 8) {
             Spacer(minLength: 0)
 
@@ -163,7 +124,7 @@ public struct WarpExpandedSurfaceView: View {
                 speedMbps: currentDisplaySpeed,
                 phase: engine.phase.isTesting ? engine.phase : (engine.currentTelemetry != nil ? .completed : .idle),
                 unit: engine.speedUnit,
-                size: 144,
+                size: hasResultsOrTesting ? 144 : 148,
                 showTicks: false,
                 progress: engine.testProgress,
                 interfaceIcon: engine.activeInterfaceIcon,
@@ -172,52 +133,66 @@ public struct WarpExpandedSurfaceView: View {
 
             Spacer(minLength: 0)
 
-            if engine.phase.isTesting {
-                Button {
-                    engine.cancelTest()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Cancel Test")
-                            .font(.system(size: 12.5, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
-            } else {
-                Button {
-                    engine.startTest()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(engine.currentTelemetry == nil ? "Start Speedtest" : "Run Again")
-                            .font(.system(size: 12.5, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
-
-                if let shareURL = engine.currentTelemetry?.shareURL {
-                    Button {
-                        NSWorkspace.shared.open(shareURL)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text("Share Result")
-                                .font(.system(size: 11.5, weight: .semibold))
-                        }
-                    }
-                    .buttonStyle(DroppyWashPillButtonStyle(height: 26, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
-                }
-            }
+            actionControls
 
             Spacer(minLength: 0)
         }
         .padding(8)
-        .frame(width: 200, height: bentoCardHeight)
+        .frame(width: hasResultsOrTesting ? 200 : 250, height: bentoCardHeight)
+    }
+
+    @ViewBuilder
+    private var actionControls: some View {
+        if engine.phase.isTesting {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    engine.cancelTest()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text("Cancel Test")
+                        .font(.system(size: 12.5, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
+            .frame(width: 180)
+        } else {
+            Button {
+                withAnimation(.spring(response: 0.52, dampingFraction: 0.82)) {
+                    engine.startTest()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(engine.currentTelemetry == nil ? "Start Speedtest" : "Run Again")
+                        .font(.system(size: 12.5, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
+            .frame(width: 180)
+
+            if let shareURL = engine.currentTelemetry?.shareURL {
+                Button {
+                    NSWorkspace.shared.open(shareURL)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Share Result")
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
+                }
+                .buttonStyle(DroppyWashPillButtonStyle(height: 26, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
+                .frame(width: 180)
+            }
+        }
     }
 
     private var rightBentoColumn: some View {
@@ -231,19 +206,21 @@ public struct WarpExpandedSurfaceView: View {
                 bentoTile(
                     title: "Download",
                     value: displayDownloadSpeed,
+                    numericValue: downloadNumericValue,
                     subtitle: isDownloadPhase ? "Testing…" : (telemetry.map { formatBytes($0.bytesReceived) } ?? "--"),
                     icon: "arrow.down.circle.fill",
                     color: .green,
-                    valueColor: displayDownloadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .green
+                    valueColor: (isDownloadPhase || (engine.currentTelemetry?.downloadMbps ?? 0) > 0) ? .green : AdaptiveColors.notchSurfacePrimaryText
                 )
 
                 bentoTile(
                     title: "Upload",
                     value: displayUploadSpeed,
+                    numericValue: uploadNumericValue,
                     subtitle: (isDownloadPhase || isUploadPhase) ? (isUploadPhase ? "Testing…" : "--") : (telemetry.map { formatBytes($0.bytesSent) } ?? "--"),
                     icon: "arrow.up.circle.fill",
                     color: .purple,
-                    valueColor: displayUploadSpeed == "--" ? AdaptiveColors.notchSurfacePrimaryText : .purple
+                    valueColor: (isUploadPhase || (engine.currentTelemetry?.uploadMbps ?? 0) > 0) ? .purple : AdaptiveColors.notchSurfacePrimaryText
                 )
             }
 
@@ -293,6 +270,7 @@ public struct WarpExpandedSurfaceView: View {
     private func bentoTile(
         title: String,
         value: String,
+        numericValue: Double? = nil,
         subtitle: String,
         icon: String,
         color: Color,
@@ -307,13 +285,23 @@ public struct WarpExpandedSurfaceView: View {
                     .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(.secondary)
             }
-            Text(value)
-                .font(.system(size: 14, weight: .semibold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .animation(.smooth(duration: 0.3), value: value)
-                .foregroundStyle(valueColor)
-                .lineLimit(1)
+            if let numericValue {
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: numericValue))
+                    .animation(.smooth(duration: 0.3), value: value)
+                    .foregroundStyle(valueColor)
+                    .lineLimit(1)
+            } else {
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.smooth(duration: 0.3), value: value)
+                    .foregroundStyle(valueColor)
+                    .lineLimit(1)
+            }
             Text(subtitle)
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(.secondary)
@@ -428,21 +416,48 @@ public struct WarpExpandedSurfaceView: View {
         return false
     }
 
+    private var downloadNumericValue: Double {
+        if isDownloadPhase {
+            return engine.displayedGaugeSpeed
+        }
+        if isTesting {
+            return engine.currentTelemetry?.downloadMbps ?? 0.0
+        }
+        return engine.latestRecordedStats?.downloadMbps ?? engine.currentTelemetry?.downloadMbps ?? 0.0
+    }
+
+    private var uploadNumericValue: Double {
+        if isUploadPhase {
+            return engine.displayedGaugeSpeed
+        }
+        if isTesting {
+            return 0.0
+        }
+        return engine.latestRecordedStats?.uploadMbps ?? engine.currentTelemetry?.uploadMbps ?? 0.0
+    }
+
     private var displayDownloadSpeed: String {
         if isDownloadPhase {
+            return engine.speedUnit.format(mbps: engine.displayedGaugeSpeed)
+        } else if isTesting {
+            if let dl = engine.currentTelemetry?.downloadMbps, dl > 0 {
+                return engine.speedUnit.format(mbps: dl)
+            }
             return "--"
-        } else if let telemetry = engine.currentTelemetry, telemetry.downloadMbps > 0 {
-            return engine.speedUnit.format(mbps: telemetry.downloadMbps)
+        } else if let mbps = (engine.latestRecordedStats?.downloadMbps ?? engine.currentTelemetry?.downloadMbps), mbps > 0 {
+            return engine.speedUnit.format(mbps: mbps)
         } else {
             return "--"
         }
     }
 
     private var displayUploadSpeed: String {
-        if isDownloadPhase || isUploadPhase {
+        if isUploadPhase {
+            return engine.speedUnit.format(mbps: engine.displayedGaugeSpeed)
+        } else if isTesting {
             return "--"
-        } else if let telemetry = engine.currentTelemetry, telemetry.uploadMbps > 0 {
-            return engine.speedUnit.format(mbps: telemetry.uploadMbps)
+        } else if let mbps = (engine.latestRecordedStats?.uploadMbps ?? engine.currentTelemetry?.uploadMbps), mbps > 0 {
+            return engine.speedUnit.format(mbps: mbps)
         } else {
             return "--"
         }
