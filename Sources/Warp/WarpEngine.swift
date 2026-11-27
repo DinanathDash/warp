@@ -149,7 +149,12 @@ public final class WarpEngine: ObservableObject {
         didSet { savePreferences() }
     }
     @Published public var testDuration: TestDuration = .sec30 {
-        didSet { savePreferences() }
+        didSet {
+            savePreferences()
+            if !phase.isTesting {
+                estimatedRemainingSeconds = testDuration.rawValue
+            }
+        }
     }
     private var isLoadingPreferences = false
 
@@ -382,7 +387,7 @@ public final class WarpEngine: ObservableObject {
                 self.displayedGaugeSpeed = dlTelemetry.downloadMbps
                 self.lastDisplayNumberUpdate = Date()
                 self.testProgress = 0.50
-                self.estimatedRemainingSeconds = max(1, maxPhaseSeconds)
+                self.estimatedRemainingSeconds = max(1, Int(self.testDuration.rawValue - self.testDuration.perPhaseSeconds))
                 WarpLog.info("Download completed: \(dlTelemetry.downloadMbps) Mbps, Ping \(dlTelemetry.pingMs) ms")
 
                 self.uploadPhaseStart = Date()
@@ -604,12 +609,15 @@ public final class WarpEngine: ObservableObject {
             MainActor.assumeIsolated {
                 let now = Date()
                 let elapsed = now.timeIntervalSince(startTime)
+                let phaseTargetSeconds = Double(self.testDuration.perPhaseSeconds)
+                let totalTargetSeconds = Double(self.testDuration.rawValue)
+                let uploadBudgetSeconds = max(1.0, totalTargetSeconds - phaseTargetSeconds)
+
                 switch self.phase {
                 case .locating, .pinging:
                     self.currentGaugeSpeed = max(0, sin(elapsed * 4) * 5.0)
                     self.testProgress = min(0.06, max(self.testProgress, 0.02 + min(1.0, elapsed / 2.0) * 0.04))
-                    let totalEstimate = self.estimatedDownloadDuration + self.estimatedUploadDuration
-                    let rem = max(1, Int(ceil(Self.smoothRemainingSeconds(elapsed: elapsed, estimate: totalEstimate))))
+                    let rem = max(1, Int(ceil(max(1.0, totalTargetSeconds - elapsed))))
                     if rem != self.estimatedRemainingSeconds {
                         self.estimatedRemainingSeconds = rem
                     }
@@ -621,10 +629,10 @@ public final class WarpEngine: ObservableObject {
                     let baseTarget = 65.0 + sin(elapsed * 3.5) * 18.0 + cos(elapsed * 7.0) * 8.0
                     self.currentGaugeSpeed = max(1.0, baseTarget)
                     let dlElapsed = now.timeIntervalSince(self.downloadPhaseStart ?? startTime)
-                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: dlElapsed, estimate: self.estimatedDownloadDuration)
+                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: dlElapsed, estimate: phaseTargetSeconds)
                     self.testProgress = min(0.49, max(self.testProgress, 0.06 + phaseFrac * 0.43))
-                    let dlRemaining = Self.smoothRemainingSeconds(elapsed: dlElapsed, estimate: self.estimatedDownloadDuration)
-                    let rem = max(1, Int(ceil(dlRemaining + self.estimatedUploadDuration)))
+                    let dlRemaining = Self.smoothRemainingSeconds(elapsed: dlElapsed, estimate: phaseTargetSeconds)
+                    let rem = max(1, Int(ceil(dlRemaining + uploadBudgetSeconds)))
                     if rem != self.estimatedRemainingSeconds {
                         self.estimatedRemainingSeconds = rem
                     }
@@ -636,9 +644,9 @@ public final class WarpEngine: ObservableObject {
                     let baseTarget = 35.0 + sin(elapsed * 4.0) * 10.0 + cos(elapsed * 8.0) * 5.0
                     self.currentGaugeSpeed = max(1.0, baseTarget)
                     let ulElapsed = now.timeIntervalSince(self.uploadPhaseStart ?? startTime)
-                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: ulElapsed, estimate: self.estimatedUploadDuration)
+                    let phaseFrac = Self.asymptoticPhaseFraction(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
                     self.testProgress = min(0.98, max(self.testProgress, 0.50 + phaseFrac * 0.48))
-                    let ulRemaining = Self.smoothRemainingSeconds(elapsed: ulElapsed, estimate: self.estimatedUploadDuration)
+                    let ulRemaining = Self.smoothRemainingSeconds(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
                     let rem = max(1, Int(ceil(ulRemaining)))
                     if rem != self.estimatedRemainingSeconds {
                         self.estimatedRemainingSeconds = rem

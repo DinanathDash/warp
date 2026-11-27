@@ -16,8 +16,6 @@ public struct WarpExpandedSurfaceView: View {
     @State private var isMorphedIn = false
     @State private var isCollapsing = false
 
-    private static var bentoCardFill: Color { AdaptiveColors.notchSurfaceCardFill }
-
     public init(
         engine: WarpEngine,
         onDismiss: @escaping () -> Void,
@@ -30,7 +28,7 @@ public struct WarpExpandedSurfaceView: View {
         self.onOpenSettings = onOpenSettings
     }
 
-    private let bentoCardHeight: CGFloat = 276
+    private let bentoCardHeight: CGFloat = 210
 
     private var isTesting: Bool {
         engine.phase.isTesting
@@ -41,7 +39,7 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             headerBar
 
             Group {
@@ -66,8 +64,8 @@ public struct WarpExpandedSurfaceView: View {
             .offset(y: isCollapsing ? -18 : (isMorphedIn ? 0 : -10))
             .opacity(isCollapsing ? 0.0 : (isMorphedIn ? 1.0 : 0.0))
         }
-        .padding(14)
-        .frame(width: 560, height: 340)
+        .padding(12)
+        .frame(width: 520, height: 268)
         .animation(.spring(response: 0.52, dampingFraction: 0.82), value: hasResultsOrTesting)
         .onAppear {
             engine.expandedVisibilityDidChange(isVisible: true)
@@ -82,32 +80,30 @@ public struct WarpExpandedSurfaceView: View {
 
     private var headerBar: some View {
         HStack {
+            Button {
+                onOpenSettings()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 11))
+            .help("Settings")
+
             Spacer()
 
-            HStack(spacing: 8) {
-                Button {
-                    onOpenSettings()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .semibold))
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    isCollapsing = true
                 }
-                .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 11))
-                .help("Settings")
-
-                Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                        isCollapsing = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                        onCollapse()
-                    }
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 10, weight: .semibold))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                    onCollapse()
                 }
-                .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 10))
-                .help("Collapse to HUD")
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 10, weight: .semibold))
             }
+            .buttonStyle(DroppyWashCircleButtonStyle(diameter: 26, tone: .neutral, glyphSize: 10))
+            .help("Collapse to HUD")
         }
     }
 
@@ -122,14 +118,14 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private var freshCenterView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 10) {
             Spacer(minLength: 0)
 
             WarpGaugeView(
                 speedMbps: 0.0,
                 phase: .idle,
                 unit: engine.speedUnit,
-                size: 190,
+                size: 148,
                 showTicks: false,
                 interfaceIcon: engine.activeInterfaceIcon,
                 onRaisedCard: true
@@ -146,32 +142,28 @@ public struct WarpExpandedSurfaceView: View {
                     Image(systemName: "play.fill")
                         .font(.system(size: 11, weight: .semibold))
                     Text("Start Speedtest")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 12.5, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(DroppyWashPillButtonStyle(height: DroppyWashSize.solo, tone: .accent(.cyan), fillsWidth: true, usesAdaptiveForegrounds: false))
-            .frame(width: 210)
+            .frame(width: 180)
 
             Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(width: 290, height: bentoCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: DroppyRadius.large, style: .continuous)
-                .fill(Self.bentoCardFill)
-        )
+        .padding(10)
+        .frame(width: 260, height: bentoCardHeight)
     }
 
     private var leftGaugeBentoCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             Spacer(minLength: 0)
 
             WarpGaugeView(
                 speedMbps: currentDisplaySpeed,
                 phase: engine.phase.isTesting ? engine.phase : (engine.currentTelemetry != nil ? .completed : .idle),
                 unit: engine.speedUnit,
-                size: 160,
+                size: 144,
                 showTicks: false,
                 progress: engine.testProgress,
                 interfaceIcon: engine.activeInterfaceIcon,
@@ -188,7 +180,7 @@ public struct WarpExpandedSurfaceView: View {
                         Image(systemName: "stop.fill")
                             .font(.system(size: 10, weight: .semibold))
                         Text("Cancel Test")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12.5, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -201,7 +193,7 @@ public struct WarpExpandedSurfaceView: View {
                         Image(systemName: "play.fill")
                             .font(.system(size: 10, weight: .semibold))
                         Text(engine.currentTelemetry == nil ? "Start Speedtest" : "Run Again")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12.5, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -215,21 +207,17 @@ public struct WarpExpandedSurfaceView: View {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 10, weight: .semibold))
                             Text("Share Result")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 11.5, weight: .semibold))
                         }
                     }
-                    .buttonStyle(DroppyWashPillButtonStyle(height: 28, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
+                    .buttonStyle(DroppyWashPillButtonStyle(height: 26, tone: .neutral, fillsWidth: true, usesAdaptiveForegrounds: false))
                 }
             }
 
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(width: 220, height: bentoCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: DroppyRadius.large, style: .continuous)
-                .fill(Self.bentoCardFill)
-        )
+        .padding(8)
+        .frame(width: 200, height: bentoCardHeight)
     }
 
     private var rightBentoColumn: some View {
@@ -238,7 +226,7 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private func activeBentoGrid(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 4) {
             HStack(spacing: 8) {
                 bentoTile(
                     title: "Download",
@@ -310,7 +298,7 @@ public struct WarpExpandedSurfaceView: View {
         color: Color,
         valueColor: Color = AdaptiveColors.notchSurfacePrimaryText
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10))
@@ -331,13 +319,13 @@ public struct WarpExpandedSurfaceView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(DroppySpacing.md)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
     }
 
     private func bentoServerTile(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "server.rack")
                     .font(.system(size: 10))
@@ -354,9 +342,9 @@ public struct WarpExpandedSurfaceView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(DroppySpacing.md)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
     }
 
     private func serverTitleText(telemetry: SpeedtestTelemetry?) -> String {
@@ -382,7 +370,7 @@ public struct WarpExpandedSurfaceView: View {
     }
 
     private func bentoDiagnosticsTile(telemetry: SpeedtestTelemetry?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "waveform.path.ecg")
                     .font(.system(size: 10))
@@ -419,9 +407,9 @@ public struct WarpExpandedSurfaceView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(DroppySpacing.md)
+        .padding(.horizontal, DroppySpacing.sm)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DroppyRadius.ms, style: .continuous).fill(Self.bentoCardFill))
     }
 
     private func rpmRating(_ rpm: Double) -> String {

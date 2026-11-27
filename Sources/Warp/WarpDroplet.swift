@@ -114,10 +114,10 @@ extension WarpDroplet: ShelfWidgetProviding {
                 title: "Warp",
                 systemImage: "speedometer",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: 380,
-                    preferredPairedWidth: 190,
+                    preferredSoloWidth: WarpShelfWidgetView.preferredSoloWidth,
+                    preferredPairedWidth: WarpShelfWidgetView.preferredPairedWidth,
                     contentHeight: .fixed(WarpShelfWidgetView.contentHeight),
-                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 70)
+                    notchWrap: ShelfWidgetNotchWrapTraits(headerHeight: 28, besideExtent: 56)
                 ),
                 searchKeywords: ["speedtest", "speed", "bandwidth", "network", "ping", "gauge"]
             )
@@ -181,7 +181,7 @@ extension WarpDroplet: ExpandedSurfaceHosting, ExpandedSurfaceProviding {
         _ id: ExpandedSurfaceID,
         fitting proposal: ExpandedSurfaceSizeProposal
     ) -> CGSize? {
-        CGSize(width: 560, height: 340)
+        CGSize(width: 520, height: 268)
     }
 
     public func expandedSurfaceDidDismiss(

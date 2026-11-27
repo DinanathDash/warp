@@ -13,9 +13,9 @@ public struct WarpShelfWidgetView: View {
     let onOpenExpanded: () -> Void
     let onOpenSettings: () -> Void
 
-    public static let contentHeight: CGFloat = 160
-    public static let preferredSoloWidth: CGFloat = 380
-    public static let preferredPairedWidth: CGFloat = 190
+    public static let contentHeight: CGFloat = 144
+    public static let preferredSoloWidth: CGFloat = 276
+    public static let preferredPairedWidth: CGFloat = 150
     public static let minimumWidth: CGFloat = 140
     public static let pairWeight: Double = 0.62
 
@@ -78,9 +78,9 @@ public struct WarpShelfWidgetView: View {
 
     private var dialSize: CGFloat {
         if context.isCompact {
-            return 90
+            return 82
         }
-        return 114
+        return 98
     }
 
     public var body: some View {
@@ -166,10 +166,10 @@ public struct WarpShelfWidgetView: View {
     // MARK: - Spacious Layout
 
     private var spaciousLayout: some View {
-        HStack(alignment: .center, spacing: DroppySpacing.xl) {
+        HStack(alignment: .center, spacing: 4) {
             gaugeButton(size: dialSize)
 
-            VStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .center, spacing: 7) {
                 // Row 1: Designated Download & Upload telemetry areas (50/50)
                 telemetryColumns(isSpacious: true)
 
@@ -181,7 +181,7 @@ public struct WarpShelfWidgetView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
@@ -342,7 +342,7 @@ public struct WarpShelfWidgetView: View {
             .accessibilityLabel("Copy test results")
 
             Button {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     if isTesting {
                         engine.cancelTest()
                     } else {
@@ -350,14 +350,15 @@ public struct WarpShelfWidgetView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     Image(systemName: isTesting ? "stop.fill" : "play.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .contentTransition(.symbolEffect(.replace))
                     Text(isTesting ? "Cancel" : (engine.latestRecordedStats == nil ? "Start" : "Test Again"))
-                        .font(.system(size: isSpacious ? 12.5 : 11, weight: .semibold))
+                        .font(.system(size: isSpacious ? 12 : 11, weight: .semibold))
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, isSpacious ? 14 : 10)
+                .frame(width: isSpacious ? (engine.latestRecordedStats == nil ? 64 : 88) : (engine.latestRecordedStats == nil ? 56 : 78))
             }
             .buttonStyle(
                 DroppyWashPillButtonStyle(
