@@ -174,6 +174,15 @@ public final class WarpEngine: ObservableObject {
         }
     }
 
+    @Published public var serverMode: ServerSelectionMode = .automatic {
+        didSet { savePreferences() }
+    }
+    @Published public var customServerURL: String = "" {
+        didSet { savePreferences() }
+    }
+    @Published public private(set) var discoveredBonjourServers: [String] = []
+    @Published public private(set) var isScanningBonjour: Bool = false
+
     public enum NetworkInterfaceKind: String, Sendable {
         case wifi = "Wi-Fi"
         case ethernet = "Ethernet"
@@ -191,6 +200,7 @@ public final class WarpEngine: ObservableObject {
     }
 
     @Published public private(set) var primaryInterfaceType: NetworkInterfaceKind = .wifi
+    @Published public private(set) var primaryInterfaceName: String = "en0"
     private var pathMonitor: NWPathMonitor?
     private let monitorQueue = DispatchQueue(label: "com.warp.pathMonitor", qos: .utility)
 
@@ -272,6 +282,9 @@ public final class WarpEngine: ObservableObject {
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                if let iface = path.availableInterfaces.first(where: { path.usesInterfaceType($0.type) }) ?? path.availableInterfaces.first {
+                    self.primaryInterfaceName = iface.name
+                }
                 if path.usesInterfaceType(.wiredEthernet) {
                     self.primaryInterfaceType = .ethernet
                 } else if path.usesInterfaceType(.cellular) {
@@ -376,9 +389,10 @@ public final class WarpEngine: ObservableObject {
 
                 self.downloadPhaseStart = Date()
                 self.phase = .downloading(currentMbps: 1.0)
+                let dlArgs = self.makeArguments(forPhase: "-u", maxPhaseSeconds: maxPhaseSeconds)
                 let (dlStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-u", "-M", "\(maxPhaseSeconds)"],
+                    arguments: dlArgs,
                     timeoutSeconds: phaseTimeout
                 )
 
@@ -408,10 +422,10 @@ public final class WarpEngine: ObservableObject {
 
                 self.uploadPhaseStart = Date()
                 self.phase = .uploading(currentMbps: 1.0)
-
+                let ulArgs = self.makeArguments(forPhase: "-d", maxPhaseSeconds: maxPhaseSeconds)
                 let (ulStdout, _) = try await self.executeProcess(
                     executable: cliPath,
-                    arguments: ["-c", "-v", "-d", "-M", "\(maxPhaseSeconds)"],
+                    arguments: ulArgs,
                     timeoutSeconds: phaseTimeout
                 )
 
@@ -594,7 +608,100 @@ public final class WarpEngine: ObservableObject {
         WarpLog.info("Test stopped by user")
     }
 
-    // MARK: - Gauge Simulation / Interpolation during Test
+    // MARK: - Server Options & Bonjour Discovery
+
+    public func discoverBonjourServers() {
+        guard !isScanningBonjour else { return }
+        detectCLI()
+        guard let cliPath = detectedCLIPath else { return }
+
+        isScanningBonjour = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let (stdout, _) = try await self.executeProcess(
+                    executable: cliPath,
+                    arguments: ["-b"],
+                    timeoutSeconds: 8.0
+                )
+                let lines = stdout.components(separatedBy: .newlines)
+                var discovered: [String] = []
+                var passedHeader = false
+                for raw in lines {
+                    let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if line.contains("----") {
+                        passedHeader = true
+                        continue
+                    }
+                    if passedHeader && !line.isEmpty {
+                        discovered.append(line)
+                    }
+                }
+                await MainActor.run {
+                    self.discoveredBonjourServers = discovered
+                    self.isScanningBonjour = false
+                    WarpLog.info("Bonjour discovery found \(discovered.count) server(s)")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isScanningBonjour = false
+                    WarpLog.error("Bonjour discovery error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func makeArguments(forPhase phaseArg: String, maxPhaseSeconds: Int) -> [String] {
+        var args = ["-c", "-v", phaseArg, "-M", "\(maxPhaseSeconds)"]
+        switch serverMode {
+        case .automatic:
+            break
+        case .privateRelay:
+            args.append("-p")
+        case .bonjour(let name):
+            if !name.isEmpty {
+                args.append(contentsOf: ["-B", name])
+            }
+        case .customURL(let url):
+            let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                args.append(contentsOf: ["-C", trimmed])
+            }
+        }
+        return args
+    }
+
+    // MARK: - Real-Time Interface Throughput Sampling
+
+    private struct InterfaceBytes {
+        let inBytes: UInt64
+        let outBytes: UInt64
+    }
+
+    nonisolated private static func readInterfaceBytes(named targetName: String) -> InterfaceBytes? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        var ptr: UnsafeMutablePointer<ifaddrs>? = first
+        while let current = ptr {
+            let name = String(cString: current.pointee.ifa_name)
+            if name == targetName,
+               let addr = current.pointee.ifa_addr,
+               addr.pointee.sa_family == UInt8(AF_LINK),
+               let ifaData = current.pointee.ifa_data {
+                let data = ifaData.assumingMemoryBound(to: if_data.self)
+                return InterfaceBytes(
+                    inBytes: UInt64(data.pointee.ifi_ibytes),
+                    outBytes: UInt64(data.pointee.ifi_obytes)
+                )
+            }
+            ptr = current.pointee.ifa_next
+        }
+        return nil
+    }
+
+    // MARK: - Gauge Simulation & Real-time Live Sampling during Test
 
     private static func asymptoticPhaseFraction(elapsed: TimeInterval, estimate: TimeInterval) -> Double {
         let ratio = max(0.0, elapsed) / max(4.0, estimate)
@@ -617,8 +724,13 @@ public final class WarpEngine: ObservableObject {
     private func startGaugeSimulation() {
         stopGaugeSimulation()
         let startTime = Date()
+        let targetInterface = primaryInterfaceName
 
-        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] timer in
+        var lastSampleTime = Date()
+        var lastBytes = Self.readInterfaceBytes(named: targetInterface)
+        var smoothedLiveSpeed: Double = 0.0
+
+        let timer = Timer(timeInterval: 0.10, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
                 return
@@ -629,6 +741,28 @@ public final class WarpEngine: ObservableObject {
                 let phaseTargetSeconds = Double(self.testDuration.perPhaseSeconds)
                 let totalTargetSeconds = Double(self.testDuration.rawValue)
                 let uploadBudgetSeconds = max(1.0, totalTargetSeconds - phaseTargetSeconds)
+
+                // Measure live interface delta
+                let dt = now.timeIntervalSince(lastSampleTime)
+                var measuredMbps: Double? = nil
+
+                if dt >= 0.25 {
+                    if let currentBytes = Self.readInterfaceBytes(named: targetInterface), let prev = lastBytes {
+                        if case .downloading = self.phase {
+                            let delta = currentBytes.inBytes >= prev.inBytes ? (currentBytes.inBytes - prev.inBytes) : 0
+                            let mbps = (Double(delta) * 8.0) / (dt * 1_000_000.0)
+                            measuredMbps = mbps
+                        } else if case .uploading = self.phase {
+                            let delta = currentBytes.outBytes >= prev.outBytes ? (currentBytes.outBytes - prev.outBytes) : 0
+                            let mbps = (Double(delta) * 8.0) / (dt * 1_000_000.0)
+                            measuredMbps = mbps
+                        }
+                        lastBytes = currentBytes
+                    } else if lastBytes == nil {
+                        lastBytes = Self.readInterfaceBytes(named: targetInterface)
+                    }
+                    lastSampleTime = now
+                }
 
                 switch self.phase {
                 case .locating, .pinging:
@@ -646,10 +780,17 @@ public final class WarpEngine: ObservableObject {
                         self.currentGaugeSpeed = 0.0
                         self.displayedGaugeSpeed = 0.0
                     } else {
-                        let activeElapsed = dlElapsed - transitionDelay
-                        let ramp = min(1.0, activeElapsed / 0.8)
-                        let baseTarget = (65.0 + sin(activeElapsed * 3.5) * 18.0 + cos(activeElapsed * 7.0) * 8.0) * ramp
-                        self.currentGaugeSpeed = max(0.0, baseTarget)
+                        if let live = measuredMbps, live > 0.5 {
+                            // Exponential moving average for stability
+                            smoothedLiveSpeed = smoothedLiveSpeed == 0.0 ? live : (smoothedLiveSpeed * 0.45 + live * 0.55)
+                            self.currentGaugeSpeed = smoothedLiveSpeed
+                        } else if smoothedLiveSpeed == 0.0 {
+                            // Seed from historical download speed if live bytes haven't arrived yet
+                            let seed = self.latestRecordedStats?.downloadMbps ?? 45.0
+                            let ramp = min(1.0, (dlElapsed - transitionDelay) / 1.0)
+                            self.currentGaugeSpeed = max(1.0, seed * 0.7 * ramp)
+                        }
+
                         if now.timeIntervalSince(self.lastDisplayNumberUpdate) >= Self.displayNumberUpdateInterval {
                             self.displayedGaugeSpeed = self.currentGaugeSpeed
                             self.lastDisplayNumberUpdate = now
@@ -664,9 +805,15 @@ public final class WarpEngine: ObservableObject {
                     }
                 case .uploading:
                     let ulElapsed = now.timeIntervalSince(self.uploadPhaseStart ?? startTime)
-                    let ramp = min(1.0, ulElapsed / 0.7)
-                    let baseTarget = (35.0 + sin(ulElapsed * 4.0) * 10.0 + cos(ulElapsed * 8.0) * 5.0) * ramp
-                    self.currentGaugeSpeed = max(0.0, baseTarget)
+                    if let live = measuredMbps, live > 0.5 {
+                        smoothedLiveSpeed = smoothedLiveSpeed == 0.0 ? live : (smoothedLiveSpeed * 0.45 + live * 0.55)
+                        self.currentGaugeSpeed = smoothedLiveSpeed
+                    } else if smoothedLiveSpeed == 0.0 {
+                        let seed = self.latestRecordedStats?.uploadMbps ?? 25.0
+                        let ramp = min(1.0, ulElapsed / 1.0)
+                        self.currentGaugeSpeed = max(1.0, seed * 0.7 * ramp)
+                    }
+
                     let phaseFrac = Self.asymptoticPhaseFraction(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
                     self.testProgress = min(0.98, max(self.testProgress, 0.50 + phaseFrac * 0.48))
                     let ulRemaining = Self.smoothRemainingSeconds(elapsed: ulElapsed, estimate: uploadBudgetSeconds)
@@ -882,6 +1029,12 @@ public final class WarpEngine: ObservableObject {
         if let retain = preferences.value(forKey: "warp.retainLastResult", as: Bool.self) {
             retainLastResult = retain
         }
+        if let mode = preferences.value(forKey: "warp.serverMode", as: ServerSelectionMode.self) {
+            serverMode = mode
+        }
+        if let customURL = preferences.value(forKey: "warp.customServerURL", as: String.self) {
+            customServerURL = customURL
+        }
         if let savedHistory = preferences.value(forKey: "warp.history", as: [WarpHistoryItem].self) {
             history = savedHistory
         }
@@ -917,6 +1070,8 @@ public final class WarpEngine: ObservableObject {
         preferences.setValue(showHUDOnFinish, forKey: "warp.showHUDOnFinish")
         preferences.setValue(testDuration.rawValue, forKey: "warp.testDuration")
         preferences.setValue(retainLastResult, forKey: "warp.retainLastResult")
+        preferences.setValue(serverMode, forKey: "warp.serverMode")
+        preferences.setValue(customServerURL.isEmpty ? nil : customServerURL, forKey: "warp.customServerURL")
         preferences.setValue(history.isEmpty ? nil : history, forKey: "warp.history")
         preferences.setValue(retainLastResult ? (currentTelemetry ?? lastTelemetry) : nil, forKey: "warp.lastTelemetry")
         if hasMeasuredDownload {

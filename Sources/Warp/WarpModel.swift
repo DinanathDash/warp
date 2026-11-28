@@ -74,6 +74,26 @@ public enum TestDuration: Int, CaseIterable, Codable, Sendable {
     }
 }
 
+public enum ServerSelectionMode: Codable, Equatable, Sendable, Hashable {
+    case automatic
+    case privateRelay
+    case bonjour(name: String)
+    case customURL(url: String)
+
+    public var displayName: String {
+        switch self {
+        case .automatic:
+            return "Apple Edge (automatic)"
+        case .privateRelay:
+            return "iCloud Private Relay"
+        case .bonjour(let name):
+            return "Bonjour: \(name)"
+        case .customURL:
+            return "Custom server URL"
+        }
+    }
+}
+
 public enum SpeedtestPhase: Equatable, Sendable {
     case idle
     case locating

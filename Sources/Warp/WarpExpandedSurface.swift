@@ -343,7 +343,7 @@ public struct WarpExpandedSurfaceView: View {
         } else if case .locating = engine.phase {
             return "Locating server…"
         } else {
-            return "Apple Edge CDN"
+            return engine.serverMode.displayName
         }
     }
 
@@ -353,7 +353,16 @@ public struct WarpExpandedSurfaceView: View {
         } else if let telemetry, !telemetry.serverName.isEmpty {
             return telemetry.serverName
         } else {
-            return "macOS networkQuality"
+            switch engine.serverMode {
+            case .automatic:
+                return "macOS networkQuality"
+            case .privateRelay:
+                return "iCloud egress relay"
+            case .bonjour(let name):
+                return "Local: \(name)"
+            case .customURL(let url):
+                return url.isEmpty ? "Custom server" : url
+            }
         }
     }
 

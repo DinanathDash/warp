@@ -21,10 +21,36 @@ public struct WarpSettingsPane: View {
     public var body: some View {
         DropletSettingsPane {
             preferencesSection
+            serverSection
             historySection
             diagnosticsSection
             licensingSection
         }
+    }
+
+    private var serverSelectionBinding: Binding<String> {
+        Binding(
+            get: {
+                switch engine.serverMode {
+                case .automatic: return "auto"
+                case .privateRelay: return "relay"
+                case .bonjour(let name): return "bonjour:\(name)"
+                case .customURL: return "custom"
+                }
+            },
+            set: { newTag in
+                if newTag == "auto" {
+                    engine.serverMode = .automatic
+                } else if newTag == "relay" {
+                    engine.serverMode = .privateRelay
+                } else if newTag == "custom" {
+                    engine.serverMode = .customURL(url: engine.customServerURL)
+                } else if newTag.hasPrefix("bonjour:") {
+                    let name = String(newTag.dropFirst("bonjour:".count))
+                    engine.serverMode = .bonjour(name: name)
+                }
+            }
+        )
     }
 
     private var preferencesSection: some View {
@@ -79,6 +105,63 @@ public struct WarpSettingsPane: View {
                     subtitle: "Keep the last test result with a Test Again button on the shelf instead of resetting to the GO screen when inactive.",
                     isOn: $engine.retainLastResult
                 )
+            }
+        }
+    }
+
+    private var serverSection: some View {
+        DropletSettingsSection {
+            settingsSectionHeader("Server")
+        } content: {
+            DropletSettingsCard {
+                DropletControlRow(
+                    title: "Test server",
+                    icon: "server.rack",
+                    infoTip: "Select the endpoint to test against. Apple Edge automatically picks the closest edge CDN. You can also test via iCloud Private Relay, discovered local Bonjour servers, or a custom configuration URL."
+                ) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("", selection: serverSelectionBinding) {
+                            Text("Apple Edge (automatic)").tag("auto")
+                            Text("iCloud Private Relay").tag("relay")
+                            if !engine.discoveredBonjourServers.isEmpty {
+                                Divider()
+                                ForEach(engine.discoveredBonjourServers, id: \.self) { server in
+                                    Text("Bonjour: \(server)").tag("bonjour:\(server)")
+                                }
+                            }
+                            Divider()
+                            Text("Custom configuration URL").tag("custom")
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+
+                if case .customURL = engine.serverMode {
+                    DropletControlRow(
+                        title: "Custom URL",
+                        icon: "link",
+                        infoTip: "URL or local path with file:// scheme pointing to a networkQuality server configuration JSON."
+                    ) {
+                        TextField("Custom URL", text: $engine.customServerURL, prompt: Text("https://... or file://..."))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
+                    }
+                }
+
+                DropletControlRow(
+                    title: "Local discovery",
+                    icon: "bonjour",
+                    infoTip: "Scan your local network for machines advertising networkQuality server instances via Bonjour."
+                ) {
+                    Button(engine.isScanningBonjour ? "Scanning…" : "Scan Bonjour") {
+                        engine.discoverBonjourServers()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(engine.isScanningBonjour)
+                }
             }
         }
     }
